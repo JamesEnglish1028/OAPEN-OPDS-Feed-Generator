@@ -200,16 +200,18 @@ def _to_opds_publication(pub) -> dict:
     belongs_to = []
     for item in _as_list(metadata_src.get("belongsTo")):
         if isinstance(item, str) and item.strip():
-            belongs_to.append({"name": item.strip()})
+            belongs_to.append({"name": item.strip(), "series": item.strip()})
         elif isinstance(item, dict):
             name = item.get("series") or item.get("name")
             if isinstance(name, str) and name.strip():
-                collection = {"name": name.strip()}
+                collection = {"name": name.strip(), "series": name.strip()}
                 series_number = item.get("seriesNumber")
                 if isinstance(series_number, str) and series_number.strip():
                     collection["position"] = series_number.strip()
+                    collection["seriesNumber"] = series_number.strip()
                 elif isinstance(series_number, int):
                     collection["position"] = str(series_number)
+                    collection["seriesNumber"] = str(series_number)
                 belongs_to.append(collection)
 
     accessibility = []
