@@ -128,12 +128,11 @@ pytest -q
 alembic revision -m "describe change"
 ```
 
-## GitHub + Render Deployment
+## Render Deployment
 
 This repo includes:
 
 - `render.yaml` for Render service settings
-- `.github/workflows/ci-deploy-render.yml` for CI test + deploy hook
 
 ### Render setup
 
@@ -146,13 +145,5 @@ This repo includes:
    - `SCHEDULER_ENABLED=true`
    - `SCHEDULER_DAILY_UTC_HOUR=2`
    - `SCHEDULER_DAILY_UTC_MINUTE=0`
-4. Copy the Render Deploy Hook URL.
-
-### GitHub Actions setup
-
-1. In GitHub repo settings, add secret:
-   - `RENDER_DEPLOY_HOOK_URL=<your_render_deploy_hook_url>`
-2. Push to `main`.
-3. GitHub Actions will:
-   - Run `pytest`
-   - Trigger Render deploy hook on success
+4. Ensure Auto-Deploy is enabled (it is enabled in `render.yaml`).
+5. Push to `main`; Render will deploy automatically.
