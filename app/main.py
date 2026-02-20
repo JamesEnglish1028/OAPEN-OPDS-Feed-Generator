@@ -123,6 +123,26 @@ def _ingest_oai(request: OaiIngestRequest) -> IngestResult:
 
 
 def _to_opds_publication(pub) -> dict:
+    def to_rfc3339(value: str | None) -> str | None:
+        if not value:
+            return None
+        candidate = value.strip()
+        if not candidate:
+            return None
+        if candidate.endswith("Z"):
+            candidate = candidate[:-1] + "+00:00"
+        # Handle common upstream format: "YYYY-MM-DD HH:MM:SS"
+        if " " in candidate and "T" not in candidate:
+            candidate = candidate.replace(" ", "T", 1)
+        try:
+            parsed = datetime.fromisoformat(candidate)
+        except ValueError:
+            return value
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.isoformat()
+
+    modified = to_rfc3339(pub.published)
     links = pub.links or [
         {
             "rel": "self",
@@ -139,8 +159,8 @@ def _to_opds_publication(pub) -> dict:
             "title": pub.title,
             "identifier": pub.identifier or pub.publication_id,
             "language": pub.language,
-            "modified": pub.published,
-            "published": pub.published,
+            "modified": modified,
+            "published": modified,
             "author": author,
             "subject": subject,
             "publisher": {"name": pub.publisher} if pub.publisher else None,
