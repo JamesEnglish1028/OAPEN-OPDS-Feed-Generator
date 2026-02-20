@@ -23,6 +23,37 @@
       "publisher": "OAPEN Press",
       "publication_date": "2024-04-01",
       "subjects": ["Social Sciences"]
+    },
+    {
+      "id": "book-3",
+      "metadata": {
+        "title": "Open Access Book Three",
+        "identifier": "https://library.oapen.org/handle/20.500.12657/123456",
+        "doi": "10.1234/example-doi",
+        "isbn": ["9780000000001"],
+        "language": ["eng"],
+        "published": "2026-02-20 11:51:54",
+        "publisher": "OAPEN Press",
+        "subject": ["Education"],
+        "belongsTo": {
+          "series": "Demo Series",
+          "seriesNumber": "12"
+        },
+        "accessibility": {
+          "accessMode": ["textual", "visual"],
+          "hazard": "unknown"
+        }
+      },
+      "author": ["Carol Example"],
+      "links": {
+        "href": "https://example.org/book-3.pdf",
+        "rel": "http://opds-spec.org/acquisition/open-access",
+        "type": "application/pdf"
+      },
+      "images": {
+        "href": "https://example.org/book-3-cover.jpg",
+        "type": "image/jpeg"
+      }
     }
   ]
 }

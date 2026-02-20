@@ -26,13 +26,13 @@ def test_ingest_json_and_opds_pagination() -> None:
     response = client.post("/ingest/json", json={"path": str(sample_path)})
     assert response.status_code == 200
     payload = response.json()
-    assert payload["accepted"] == 2
-    assert payload["total_indexed"] == 2
+    assert payload["accepted"] == 3
+    assert payload["total_indexed"] == 3
 
     feed_page_1 = client.get("/opds?page=1&page_size=1")
     assert feed_page_1.status_code == 200
     page_1_json = feed_page_1.json()
-    assert page_1_json["metadata"]["numberOfItems"] == 2
+    assert page_1_json["metadata"]["numberOfItems"] == 3
     assert len(page_1_json["publications"]) == 1
     rels = [link["rel"] for link in page_1_json["links"]]
     assert "next" in rels
@@ -55,6 +55,15 @@ def test_get_single_publication() -> None:
     payload = response.json()
     assert payload["metadata"]["title"] == "Open Access Book One"
 
+    enriched = client.get("/publications/book-3")
+    assert enriched.status_code == 200
+    enriched_payload = enriched.json()
+    assert enriched_payload["metadata"]["belongsTo"][0]["name"] == "Demo Series"
+    assert enriched_payload["metadata"]["altIdentifier"][0] == "https://doi.org/10.1234/example-doi"
+    assert "urn:isbn:9780000000001" in enriched_payload["metadata"]["altIdentifier"]
+    assert enriched_payload["images"][0]["href"] == "https://example.org/book-3-cover.jpg"
+    assert enriched_payload["metadata"]["accessibility"][0]["hazard"] == "unknown"
+
 
 def test_persistence_across_store_instances() -> None:
     _reset_store()
@@ -64,7 +73,7 @@ def test_persistence_across_store_instances() -> None:
 
     persisted = PublicationStore("sqlite:///./test_oapen_opds.db")
     persisted.initialize()
-    assert persisted.count() == 2
+    assert persisted.count() == 3
 
 
 def test_incremental_checkpoint_and_palace_validation(monkeypatch) -> None:

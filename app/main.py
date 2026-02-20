@@ -47,6 +47,14 @@ class ManualHarvestRequest(BaseModel):
     max_records: int | None = None
 
 
+def _as_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
 def _checkpoint_key(base_url: str, metadata_prefix: str, set_name: str | None) -> str:
     return f"{base_url}|{metadata_prefix}|{set_name or 'default'}"
 
@@ -143,6 +151,23 @@ def _to_opds_publication(pub) -> dict:
         return parsed.isoformat()
 
     modified = to_rfc3339(pub.published)
+    raw = pub.raw if isinstance(pub.raw, dict) else {}
+    metadata_src = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
+
+    image_links = []
+    for image in _as_list(raw.get("images")):
+        if not isinstance(image, dict):
+            continue
+        href = image.get("href")
+        if not isinstance(href, str) or not href:
+            continue
+        image_links.append(
+            {
+                "href": href,
+                "type": image.get("type") or "image/jpeg",
+            }
+        )
+
     links = pub.links or [
         {
             "rel": "self",
@@ -150,6 +175,48 @@ def _to_opds_publication(pub) -> dict:
             "type": "application/opds+json",
         }
     ]
+    if image_links:
+        existing_cover = any(link.get("rel") in {"cover", "http://opds-spec.org/image"} for link in links if isinstance(link, dict))
+        if not existing_cover:
+            links.append(
+                {
+                    "rel": "http://opds-spec.org/image",
+                    "href": image_links[0]["href"],
+                    "type": image_links[0]["type"],
+                }
+            )
+
+    alt_identifiers = []
+    doi = metadata_src.get("doi")
+    if isinstance(doi, str) and doi.strip():
+        doi_value = doi.strip()
+        if doi_value.lower().startswith("doi:"):
+            doi_value = doi_value[4:].strip()
+        alt_identifiers.append(f"https://doi.org/{doi_value}")
+    for isbn in _as_list(metadata_src.get("isbn")):
+        if isinstance(isbn, str) and isbn.strip():
+            alt_identifiers.append(f"urn:isbn:{isbn.strip()}")
+
+    belongs_to = []
+    for item in _as_list(metadata_src.get("belongsTo")):
+        if isinstance(item, str) and item.strip():
+            belongs_to.append({"name": item.strip()})
+        elif isinstance(item, dict):
+            name = item.get("series") or item.get("name")
+            if isinstance(name, str) and name.strip():
+                collection = {"name": name.strip()}
+                series_number = item.get("seriesNumber")
+                if isinstance(series_number, str) and series_number.strip():
+                    collection["position"] = series_number.strip()
+                elif isinstance(series_number, int):
+                    collection["position"] = str(series_number)
+                belongs_to.append(collection)
+
+    accessibility = []
+    for item in _as_list(metadata_src.get("accessibility")):
+        if isinstance(item, dict):
+            accessibility.append(item)
+
     author = [{"name": name} for name in pub.authors] if pub.authors else []
     subject = [{"name": value} for value in pub.subjects] if pub.subjects else []
 
@@ -164,8 +231,12 @@ def _to_opds_publication(pub) -> dict:
             "author": author,
             "subject": subject,
             "publisher": {"name": pub.publisher} if pub.publisher else None,
+            "belongsTo": belongs_to,
+            "altIdentifier": alt_identifiers,
+            "accessibility": accessibility,
         },
         "links": links,
+        "images": image_links,
     }
 
 

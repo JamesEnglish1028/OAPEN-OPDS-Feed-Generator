@@ -17,6 +17,7 @@ Small service that ingests OAPEN metadata (JSON or OAI-PMH Dublin Core) and expo
 - Paginated OPDS 2 feed (`GET /opds?page=1&page_size=50`)
 - Single publication endpoint (`GET /publications/{id}`)
 - Palace-oriented OPDS profile validation (`GET /validate/palace`)
+- OAPEN metadata extensions mapped into OPDS output (`belongsTo`, `images`, `altIdentifier`, `accessibility`)
 - Persistent storage with `DATABASE_URL` (SQLite default, PostgreSQL supported)
 - Harvest checkpoint visibility (`GET /harvest/checkpoints`)
 - Alembic migration/versioning for schema changes
