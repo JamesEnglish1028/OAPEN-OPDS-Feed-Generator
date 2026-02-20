@@ -1,0 +1,28 @@
+{
+  "records": [
+    {
+      "id": "book-1",
+      "title": "Open Access Book One",
+      "authors": ["Alice Example"],
+      "language": "en",
+      "publisher": "OAPEN Press",
+      "publication_date": "2024-03-01",
+      "subjects": ["Humanities"],
+      "links": [
+        {
+          "href": "https://example.org/book-1.epub",
+          "type": "application/epub+zip"
+        }
+      ]
+    },
+    {
+      "id": "book-2",
+      "title": "Open Access Book Two",
+      "authors": ["Bob Example"],
+      "language": "en",
+      "publisher": "OAPEN Press",
+      "publication_date": "2024-04-01",
+      "subjects": ["Social Sciences"]
+    }
+  ]
+}

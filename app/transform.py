@@ -1,0 +1,124 @@
+from __future__ import annotations
+
+import hashlib
+from typing import Any
+
+from app.models import NormalizedPublication
+
+
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def _first_str(*values: Any) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _normalize_links(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    links = raw.get("links") or raw.get("formats") or raw.get("files") or []
+    normalized: list[dict[str, Any]] = []
+    for link in _as_list(links):
+        if not isinstance(link, dict):
+            continue
+        href = _first_str(link.get("href"), link.get("url"), link.get("link"))
+        if not href:
+            continue
+        rel = _first_str(link.get("rel")) or "http://opds-spec.org/acquisition"
+        media_type = _first_str(link.get("type"), link.get("mediaType"), link.get("mimetype"))
+        if media_type is None:
+            media_type = "application/epub+zip" if href.endswith(".epub") else "application/octet-stream"
+        normalized.append({"href": href, "rel": rel, "type": media_type})
+    return normalized
+
+
+def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
+    metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
+    identifier = _first_str(
+        raw.get("id"),
+        raw.get("uuid"),
+        raw.get("identifier"),
+        raw.get("doi"),
+        raw.get("isbn"),
+        metadata.get("identifier"),
+        metadata.get("doi"),
+        metadata.get("isbn"),
+    )
+    title = _first_str(raw.get("title"), raw.get("name"), metadata.get("title"))
+    if not title:
+        return None
+    if not identifier:
+        signature = hashlib.sha1(title.encode("utf-8")).hexdigest()[:12]
+        identifier = f"oapen:auto:{signature}"
+
+    author_field = raw.get("authors") or raw.get("author") or raw.get("creators") or metadata.get("author")
+    editor_field = metadata.get("editor")
+    authors = [str(v).strip() for v in _as_list(author_field) if str(v).strip()]
+    if not authors:
+        authors = [str(v).strip() for v in _as_list(editor_field) if str(v).strip()]
+    if not authors:
+        creator_nodes = raw.get("creator")
+        if isinstance(creator_nodes, list):
+            authors = [str(v.get("name", "")).strip() for v in creator_nodes if isinstance(v, dict) and str(v.get("name", "")).strip()]
+
+    subjects = [str(v).strip() for v in _as_list(raw.get("subjects") or raw.get("keywords") or metadata.get("subject")) if str(v).strip()]
+    language = _first_str(raw.get("language"), raw.get("lang"), metadata.get("language"))
+    if language is None:
+        language = _first_str(*[str(v) for v in _as_list(metadata.get("language"))])
+    published = _first_str(raw.get("published"), raw.get("publication_date"), raw.get("date"), metadata.get("published"), metadata.get("modified"))
+
+    return NormalizedPublication(
+        publication_id=identifier,
+        title=title,
+        authors=authors,
+        language=language,
+        publisher=_first_str(raw.get("publisher"), metadata.get("publisher"), metadata.get("imprint")),
+        published=published,
+        identifier=identifier,
+        subjects=subjects,
+        links=_normalize_links(raw),
+        source="json",
+        raw=raw,
+    )
+
+
+def normalize_oai_record(fields: dict[str, list[str]]) -> NormalizedPublication | None:
+    title = _first_str(*fields.get("title", []))
+    identifier = _first_str(*fields.get("identifier", []))
+    if not title:
+        return None
+    if not identifier:
+        signature = hashlib.sha1(title.encode("utf-8")).hexdigest()[:12]
+        identifier = f"oapen:oai:{signature}"
+
+    links: list[dict[str, Any]] = []
+    for value in fields.get("identifier", []):
+        if value.startswith("http://") or value.startswith("https://"):
+            media_type = "application/epub+zip" if value.endswith(".epub") else "application/octet-stream"
+            links.append(
+                {
+                    "href": value,
+                    "rel": "http://opds-spec.org/acquisition",
+                    "type": media_type,
+                }
+            )
+
+    return NormalizedPublication(
+        publication_id=identifier,
+        title=title,
+        authors=[v for v in fields.get("creator", []) if v],
+        language=_first_str(*fields.get("language", [])),
+        publisher=_first_str(*fields.get("publisher", [])),
+        published=_first_str(*fields.get("date", []), *fields.get("datestamp", [])),
+        identifier=identifier,
+        subjects=[v for v in fields.get("subject", []) if v],
+        links=links,
+        source="oai-pmh",
+        raw={k: v for k, v in fields.items()},
+    )
