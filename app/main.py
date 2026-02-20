@@ -135,6 +135,7 @@ def _to_opds_publication(pub) -> dict:
 
     return {
         "metadata": {
+            "@type": "http://schema.org/Book",
             "title": pub.title,
             "identifier": pub.identifier or pub.publication_id,
             "language": pub.language,
@@ -258,6 +259,7 @@ def opds_feed(
 
     return {
         "metadata": {
+            "@type": "http://schema.org/DataFeed",
             "title": "OAPEN OPDS Catalog",
             "numberOfItems": total,
             "itemsPerPage": page_size,
