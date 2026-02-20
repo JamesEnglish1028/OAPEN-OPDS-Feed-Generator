@@ -175,16 +175,6 @@ def _to_opds_publication(pub) -> dict:
             "type": "application/opds+json",
         }
     ]
-    if image_links:
-        existing_cover = any(link.get("rel") in {"cover", "http://opds-spec.org/image"} for link in links if isinstance(link, dict))
-        if not existing_cover:
-            links.append(
-                {
-                    "rel": "http://opds-spec.org/image",
-                    "href": image_links[0]["href"],
-                    "type": image_links[0]["type"],
-                }
-            )
 
     alt_identifiers = []
     doi = metadata_src.get("doi")
@@ -202,17 +192,21 @@ def _to_opds_publication(pub) -> dict:
         if isinstance(item, str) and item.strip():
             belongs_to.append({"name": item.strip(), "series": item.strip()})
         elif isinstance(item, dict):
-            name = item.get("series") or item.get("name")
-            if isinstance(name, str) and name.strip():
-                collection = {"name": name.strip(), "series": name.strip()}
-                series_number = item.get("seriesNumber")
-                if isinstance(series_number, str) and series_number.strip():
-                    collection["position"] = series_number.strip()
-                    collection["seriesNumber"] = series_number.strip()
-                elif isinstance(series_number, int):
-                    collection["position"] = str(series_number)
-                    collection["seriesNumber"] = str(series_number)
-                belongs_to.append(collection)
+            # Preserve OAPEN belongsTo structure, while also exposing OPDS-friendly keys.
+            collection = dict(item)
+            series_value = item.get("series")
+            if isinstance(series_value, str) and series_value.strip():
+                collection.setdefault("name", series_value.strip())
+            elif isinstance(item.get("name"), str) and item["name"].strip():
+                collection.setdefault("name", item["name"].strip())
+
+            series_number = item.get("seriesNumber")
+            if isinstance(series_number, str) and series_number.strip():
+                collection.setdefault("position", series_number.strip())
+            elif isinstance(series_number, int):
+                collection.setdefault("position", str(series_number))
+
+            belongs_to.append(collection)
 
     accessibility = []
     for item in _as_list(metadata_src.get("accessibility")):
