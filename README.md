@@ -11,6 +11,7 @@ Small service that ingests OAPEN metadata (JSON or OAI-PMH Dublin Core) and expo
 ## Features
 
 - Ingest from JSON file (`POST /ingest/json`)
+- Ingest from JSON URL (`POST /ingest/json-url`)
 - Ingest from OAI-PMH endpoint with checkpointed incremental windows (`POST /ingest/oai-pmh`)
 - Normalize/validate records into OPDS-like publication entries
 - Paginated OPDS 2 feed (`GET /opds?page=1&page_size=50`)
@@ -62,6 +63,14 @@ Ingest JSON from local path:
 curl -X POST http://127.0.0.1:8000/ingest/json \
   -H "content-type: application/json" \
   -d '{"path":"tests/data/sample_oapen.json"}'
+```
+
+Ingest JSON directly from URL (useful on Render):
+
+```bash
+curl -X POST http://127.0.0.1:8000/ingest/json-url \
+  -H "content-type: application/json" \
+  -d '{"url":"https://memo.oapen.org/file/oapen/OAPENLibrary.json"}'
 ```
 
 Ingest from OAI-PMH:

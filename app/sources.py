@@ -25,6 +25,13 @@ def load_json_records(path: str) -> list[dict[str, Any]]:
     return _extract_records(payload)
 
 
+def load_json_records_from_url(url: str, timeout_seconds: int = 120) -> list[dict[str, Any]]:
+    response = requests.get(url, timeout=timeout_seconds)
+    response.raise_for_status()
+    payload = response.json()
+    return _extract_records(payload)
+
+
 def load_oai_dc_records(
     base_url: str,
     metadata_prefix: str = "oai_dc",

@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from app.db_migrations import run_migrations
 from app.harvest import run_incremental_for_all_checkpoints
 from app.scheduler import IncrementalHarvestScheduler
-from app.sources import load_json_records, load_oai_dc_records
+from app.sources import load_json_records, load_json_records_from_url, load_oai_dc_records
 from app.store import IngestResult, PublicationStore
 from app.transform import normalize_json_record, normalize_oai_record
 from app.validation import validate_palace_opds_feed
@@ -26,6 +26,10 @@ harvest_scheduler = IncrementalHarvestScheduler(
 
 class JsonIngestRequest(BaseModel):
     path: str = Field(description="Absolute or workspace-relative path to JSON metadata file.")
+
+
+class JsonUrlIngestRequest(BaseModel):
+    url: str = Field(description="HTTP(S) URL to a JSON metadata file.")
 
 
 class OaiIngestRequest(BaseModel):
@@ -59,6 +63,18 @@ def _max_date_string(values: list[str | None]) -> str | None:
 def _ingest_json(path: str) -> IngestResult:
     result = IngestResult(accepted=0, rejected=0, errors=[])
     for raw in load_json_records(path):
+        normalized = normalize_json_record(raw)
+        if normalized is None:
+            result.rejected += 1
+            continue
+        store.upsert(normalized)
+        result.accepted += 1
+    return result
+
+
+def _ingest_json_url(url: str) -> IngestResult:
+    result = IngestResult(accepted=0, rejected=0, errors=[])
+    for raw in load_json_records_from_url(url):
         normalized = normalize_json_record(raw)
         if normalized is None:
             result.rejected += 1
@@ -165,9 +181,28 @@ def shutdown() -> None:
 
 @app.post("/ingest/json")
 def ingest_json(request: JsonIngestRequest) -> dict:
-    result = _ingest_json(request.path)
+    try:
+        result = _ingest_json(request.path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail=f"JSON file not found on server: {request.path}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"JSON ingest failed: {exc}") from exc
     return {
         "source": "json",
+        "accepted": result.accepted,
+        "rejected": result.rejected,
+        "total_indexed": store.count(),
+    }
+
+
+@app.post("/ingest/json-url")
+def ingest_json_url(request: JsonUrlIngestRequest) -> dict:
+    try:
+        result = _ingest_json_url(request.url)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"JSON URL ingest failed: {exc}") from exc
+    return {
+        "source": "json-url",
         "accepted": result.accepted,
         "rejected": result.rejected,
         "total_indexed": store.count(),
