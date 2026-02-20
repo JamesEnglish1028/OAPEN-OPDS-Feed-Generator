@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import ijson
 import requests
 
 
@@ -19,17 +21,45 @@ def _extract_records(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
-def load_json_records(path: str) -> list[dict[str, Any]]:
-    content = Path(path).read_text(encoding="utf-8")
-    payload = json.loads(content)
-    return _extract_records(payload)
+def _iter_stream_records(stream) -> Iterator[dict[str, Any]]:
+    for pointer in ("publications.item", "records.item", "items.item", "results.item"):
+        stream.seek(0)
+        found_any = False
+        for item in ijson.items(stream, pointer):
+            if isinstance(item, dict):
+                found_any = True
+                yield item
+        if found_any:
+            return
+
+    stream.seek(0)
+    payload = json.load(stream)
+    for record in _extract_records(payload):
+        yield record
 
 
-def load_json_records_from_url(url: str, timeout_seconds: int = 120) -> list[dict[str, Any]]:
+def iter_json_records(path: str) -> Iterator[dict[str, Any]]:
+    with Path(path).open("rb") as handle:
+        yield from _iter_stream_records(handle)
+
+
+def iter_json_records_from_url(url: str, timeout_seconds: int = 120) -> Iterator[dict[str, Any]]:
+    with requests.get(url, timeout=timeout_seconds, stream=True) as response:
+        response.raise_for_status()
+        response.raw.decode_content = True
+        found_any = False
+        for item in ijson.items(response.raw, "publications.item"):
+            if isinstance(item, dict):
+                found_any = True
+                yield item
+        if found_any:
+            return
+
     response = requests.get(url, timeout=timeout_seconds)
     response.raise_for_status()
     payload = response.json()
-    return _extract_records(payload)
+    for record in _extract_records(payload):
+        yield record
 
 
 def load_oai_dc_records(

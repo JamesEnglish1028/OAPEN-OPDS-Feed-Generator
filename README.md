@@ -73,6 +73,8 @@ curl -X POST http://127.0.0.1:8000/ingest/json-url \
   -d '{"url":"https://memo.oapen.org/file/oapen/OAPENLibrary.json"}'
 ```
 
+Note: `json-url` ingestion streams records to reduce memory usage for large feeds.
+
 Ingest from OAI-PMH:
 
 ```bash

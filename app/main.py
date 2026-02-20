@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from app.db_migrations import run_migrations
 from app.harvest import run_incremental_for_all_checkpoints
 from app.scheduler import IncrementalHarvestScheduler
-from app.sources import load_json_records, load_json_records_from_url, load_oai_dc_records
+from app.sources import iter_json_records, iter_json_records_from_url, load_oai_dc_records
 from app.store import IngestResult, PublicationStore
 from app.transform import normalize_json_record, normalize_oai_record
 from app.validation import validate_palace_opds_feed
@@ -62,7 +62,7 @@ def _max_date_string(values: list[str | None]) -> str | None:
 
 def _ingest_json(path: str) -> IngestResult:
     result = IngestResult(accepted=0, rejected=0, errors=[])
-    for raw in load_json_records(path):
+    for raw in iter_json_records(path):
         normalized = normalize_json_record(raw)
         if normalized is None:
             result.rejected += 1
@@ -74,7 +74,7 @@ def _ingest_json(path: str) -> IngestResult:
 
 def _ingest_json_url(url: str) -> IngestResult:
     result = IngestResult(accepted=0, rejected=0, errors=[])
-    for raw in load_json_records_from_url(url):
+    for raw in iter_json_records_from_url(url):
         normalized = normalize_json_record(raw)
         if normalized is None:
             result.rejected += 1
@@ -232,11 +232,8 @@ def opds_feed(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
 ) -> dict:
-    items = store.all()
-    total = len(items)
-    start = (page - 1) * page_size
-    end = start + page_size
-    subset = items[start:end]
+    total, subset = store.page(page=page, page_size=page_size)
+    end = (page - 1) * page_size + len(subset)
     publications = [_to_opds_publication(pub) for pub in subset]
 
     links = [

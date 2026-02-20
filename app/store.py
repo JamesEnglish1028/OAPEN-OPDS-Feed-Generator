@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, String, Text, create_engine, select
+from sqlalchemy import DateTime, String, Text, create_engine, func as sqla_func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql import func
@@ -118,6 +118,14 @@ class PublicationStore:
             statement = select(PublicationRow).order_by(PublicationRow.publication_id.asc())
             rows = session.scalars(statement).all()
             return [self._to_publication(row) for row in rows]
+
+    def page(self, page: int, page_size: int) -> tuple[int, list[NormalizedPublication]]:
+        offset = (page - 1) * page_size
+        with self._session() as session:
+            total = session.scalar(select(sqla_func.count()).select_from(PublicationRow)) or 0
+            statement = select(PublicationRow).order_by(PublicationRow.publication_id.asc()).offset(offset).limit(page_size)
+            rows = session.scalars(statement).all()
+            return total, [self._to_publication(row) for row in rows]
 
     def count(self) -> int:
         with self._session() as session:
