@@ -235,6 +235,13 @@ def _to_opds_publication(pub) -> dict:
             if "name" in entry:
                 series_entries.append(entry)
 
+    collection_value = None
+    funder_source = metadata_src.get("funder")
+    for item in _as_list(funder_source):
+        if isinstance(item, str) and item.strip():
+            collection_value = item.strip()
+            break
+
     accessibility = []
     for item in _as_list(metadata_src.get("accessibility")):
         if isinstance(item, dict):
@@ -261,8 +268,13 @@ def _to_opds_publication(pub) -> dict:
     }
     if description:
         metadata["description"] = description
+    belongs_to_obj = {}
     if series_entries:
-        metadata["belongsTo"] = {"series": series_entries[0]}
+        belongs_to_obj["series"] = series_entries[0]
+    if collection_value:
+        belongs_to_obj["collection"] = collection_value
+    if belongs_to_obj:
+        metadata["belongsTo"] = belongs_to_obj
     if alt_identifiers:
         metadata["altIdentifier"] = alt_identifiers
     if accessibility:

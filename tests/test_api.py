@@ -62,6 +62,7 @@ def test_get_single_publication() -> None:
     assert enriched_payload["metadata"]["description"] == "A demonstration title with belongsTo and accessibility metadata."
     assert enriched_payload["metadata"]["belongsTo"]["series"]["name"] == "Demo Series"
     assert enriched_payload["metadata"]["belongsTo"]["series"]["position"] == 12
+    assert enriched_payload["metadata"]["belongsTo"]["collection"] == "SciFi Classics"
     assert all(value is not None for value in enriched_payload["metadata"]["belongsTo"]["series"].values())
     assert enriched_payload["metadata"]["altIdentifier"][0] == "https://doi.org/10.1234/example-doi"
     assert "urn:isbn:9780000000001" in enriched_payload["metadata"]["altIdentifier"]

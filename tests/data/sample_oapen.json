@@ -35,6 +35,7 @@
         "published": "2026-02-20 11:51:54",
         "description": "A demonstration title with belongsTo and accessibility metadata.",
         "publisher": "OAPEN Press",
+        "funder": ["SciFi Classics"],
         "subject": ["Education"],
         "belongsTo": {
           "series": "Demo Series",
