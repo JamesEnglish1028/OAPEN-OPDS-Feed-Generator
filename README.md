@@ -37,6 +37,9 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+`requirements.txt` installs `psycopg[binary]` automatically on Python `<3.14` (including Render Python 3.12).  
+On Python `3.14+`, install a compatible PostgreSQL driver manually if you are not using SQLite.
+
 Open docs: `http://127.0.0.1:8000/docs`
 
 Set database connection (optional):
