@@ -1,3 +1,9 @@
+databases:
+  - name: oapen-opds-db
+    databaseName: oapen_opds
+    user: oapen_opds_user
+    plan: free
+
 services:
   - type: web
     name: oapen-opds-feed-generator
@@ -11,9 +17,11 @@ services:
       - key: PYTHON_VERSION
         value: 3.12.8
       - key: DATABASE_URL
-        value: sqlite:///./oapen_opds.db
+        fromDatabase:
+          name: oapen-opds-db
+          property: connectionString
       - key: SCHEDULER_ENABLED
-        value: "true"
+        value: "false"
       - key: SCHEDULER_DAILY_UTC_HOUR
         value: "2"
       - key: SCHEDULER_DAILY_UTC_MINUTE

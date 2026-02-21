@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import threading
+import uuid
 from datetime import UTC, datetime
 from urllib.parse import urlencode
 
@@ -29,6 +31,10 @@ class JsonIngestRequest(BaseModel):
 
 
 class JsonUrlIngestRequest(BaseModel):
+    url: str = Field(description="HTTP(S) URL to a JSON metadata file.")
+
+
+class IngestJobRequest(BaseModel):
     url: str = Field(description="HTTP(S) URL to a JSON metadata file.")
 
 
@@ -74,6 +80,9 @@ LANGUAGE_LABELS = {
     "swe": "Swedish",
 }
 
+ingest_jobs: dict[str, dict] = {}
+ingest_jobs_lock = threading.Lock()
+
 
 def _checkpoint_key(base_url: str, metadata_prefix: str, set_name: str | None) -> str:
     return f"{base_url}|{metadata_prefix}|{set_name or 'default'}"
@@ -86,6 +95,10 @@ def _today_ymd() -> str:
 def _max_date_string(values: list[str | None]) -> str | None:
     candidates = sorted([value for value in values if value])
     return candidates[-1] if candidates else None
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(UTC).isoformat()
 
 
 def _ingest_json(path: str) -> IngestResult:
@@ -110,6 +123,30 @@ def _ingest_json_url(url: str) -> IngestResult:
         store.upsert(normalized)
         result.accepted += 1
     return result
+
+
+def _set_job_state(job_id: str, **updates) -> None:
+    with ingest_jobs_lock:
+        existing = ingest_jobs.get(job_id)
+        if existing is None:
+            return
+        existing.update(updates)
+
+
+def _run_json_url_ingest_job(job_id: str, url: str) -> None:
+    _set_job_state(job_id, status="running", started_at=_utcnow_iso())
+    try:
+        result = _ingest_json_url(url)
+        _set_job_state(
+            job_id,
+            status="completed",
+            completed_at=_utcnow_iso(),
+            accepted=result.accepted,
+            rejected=result.rejected,
+            total_indexed=store.count(),
+        )
+    except Exception as exc:
+        _set_job_state(job_id, status="failed", completed_at=_utcnow_iso(), error=str(exc))
 
 
 def _ingest_oai(request: OaiIngestRequest) -> IngestResult:
@@ -383,6 +420,47 @@ def ingest_json_url(request: JsonUrlIngestRequest) -> dict:
         "rejected": result.rejected,
         "total_indexed": store.count(),
     }
+
+
+@app.post("/ingest/json-url/jobs")
+def create_json_url_ingest_job(request: IngestJobRequest) -> dict:
+    job_id = str(uuid.uuid4())
+    with ingest_jobs_lock:
+        ingest_jobs[job_id] = {
+            "job_id": job_id,
+            "type": "json-url",
+            "status": "queued",
+            "url": request.url,
+            "created_at": _utcnow_iso(),
+            "started_at": None,
+            "completed_at": None,
+            "accepted": None,
+            "rejected": None,
+            "total_indexed": None,
+            "error": None,
+        }
+
+    worker = threading.Thread(target=_run_json_url_ingest_job, args=(job_id, request.url), daemon=True)
+    worker.start()
+    with ingest_jobs_lock:
+        return dict(ingest_jobs[job_id])
+
+
+@app.get("/ingest/jobs/{job_id}")
+def ingest_job(job_id: str) -> dict:
+    with ingest_jobs_lock:
+        job = ingest_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Ingest job not found")
+        return dict(job)
+
+
+@app.get("/ingest/jobs")
+def list_ingest_jobs(limit: int = Query(default=20, ge=1, le=200)) -> dict:
+    with ingest_jobs_lock:
+        jobs = list(ingest_jobs.values())
+    jobs.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+    return {"count": len(jobs), "jobs": jobs[:limit]}
 
 
 @app.post("/ingest/oai-pmh")

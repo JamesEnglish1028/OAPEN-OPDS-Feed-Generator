@@ -12,6 +12,7 @@ Small service that ingests OAPEN metadata (JSON or OAI-PMH Dublin Core) and expo
 
 - Ingest from JSON file (`POST /ingest/json`)
 - Ingest from JSON URL (`POST /ingest/json-url`)
+- Async ingest jobs for JSON URLs (`POST /ingest/json-url/jobs`, `GET /ingest/jobs/{job_id}`)
 - Ingest from OAI-PMH endpoint with checkpointed incremental windows (`POST /ingest/oai-pmh`)
 - Normalize/validate records into OPDS-like publication entries
 - Paginated OPDS 2 feed (`GET /opds?page=1&page_size=50`)
@@ -79,6 +80,20 @@ curl -X POST http://127.0.0.1:8000/ingest/json-url \
 ```
 
 Note: `json-url` ingestion streams records to reduce memory usage for large feeds.
+
+Run URL ingest as a background job (non-blocking):
+
+```bash
+curl -X POST http://127.0.0.1:8000/ingest/json-url/jobs \
+  -H "content-type: application/json" \
+  -d '{"url":"https://memo.oapen.org/file/oapen/OAPENLibrary.json"}'
+```
+
+Check job status:
+
+```bash
+curl "http://127.0.0.1:8000/ingest/jobs/<job_id>"
+```
 
 Ingest from OAI-PMH:
 
@@ -187,9 +202,15 @@ This repo includes:
    - Build: `pip install -r requirements.txt`
    - Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 3. Set environment variables in Render:
-   - `DATABASE_URL` (use Render PostgreSQL for production)
-   - `SCHEDULER_ENABLED=true`
+   - `DATABASE_URL` (from Render Postgres connection string)
+   - `SCHEDULER_ENABLED=false` (recommended until you configure recurring harvest policy)
    - `SCHEDULER_DAILY_UTC_HOUR=2`
    - `SCHEDULER_DAILY_UTC_MINUTE=0`
 4. Ensure Auto-Deploy is enabled (it is enabled in `render.yaml`).
 5. Push to `main`; Render will deploy automatically.
+
+### Persistent Postgres mode
+
+- `render.yaml` provisions `oapen-opds-db` and injects its connection string into `DATABASE_URL`.
+- On first deploy, migrations run automatically at startup.
+- Data persists across service restarts/redeploys, so re-ingest is no longer required after each deployment.
