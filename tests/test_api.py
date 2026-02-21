@@ -218,3 +218,58 @@ def test_publisher_normalization_for_opds_metadata(tmp_path) -> None:
 
     empty_string_pub = client.get("/publications/pub-empty-string").json()
     assert "publisher" not in empty_string_pub["metadata"]
+
+
+def test_language_normalization_and_omission(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "language_cases.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "publications": [
+                    {"id": "lang-two", "title": "Language Two", "language": "en"},
+                    {"id": "lang-three", "title": "Language Three", "language": "esp"},
+                    {"id": "lang-word", "title": "Language Word", "language": "spanish"},
+                    {"id": "lang-null", "title": "Language Null", "language": None},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+    assert ingest.json()["accepted"] == 4
+
+    two_letter = client.get("/publications/lang-two").json()
+    assert two_letter["metadata"]["language"] == "EN"
+
+    three_letter = client.get("/publications/lang-three").json()
+    assert three_letter["metadata"]["language"] == "ESP"
+
+    language_word = client.get("/publications/lang-word").json()
+    assert language_word["metadata"]["language"] == "Spanish"
+
+    null_language = client.get("/publications/lang-null").json()
+    assert "language" not in null_language["metadata"]
+
+    lower_case_language_feed = client.get("/opds/languages/en?page=1&page_size=10")
+    assert lower_case_language_feed.status_code == 200
+    assert lower_case_language_feed.json()["metadata"]["numberOfItems"] == 1
+
+
+def test_opds_metadata_omits_null_temporal_fields(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "null_time_case.json"
+    payload_path.write_text(
+        json.dumps({"publications": [{"id": "null-time", "title": "No Published Date"}]}),
+        encoding="utf-8",
+    )
+
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+    publication = client.get("/publications/null-time")
+    assert publication.status_code == 200
+    metadata = publication.json()["metadata"]
+    assert "modified" not in metadata
+    assert "published" not in metadata

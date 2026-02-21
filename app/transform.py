@@ -22,6 +22,38 @@ def _first_str(*values: Any) -> str | None:
     return None
 
 
+def normalize_language_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        for item in value:
+            normalized = normalize_language_value(item)
+            if normalized:
+                return normalized
+        return None
+    if isinstance(value, dict):
+        return normalize_language_value(value.get("code") or value.get("name") or value.get("label"))
+    if not isinstance(value, str):
+        return None
+
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if cleaned.isalpha() and len(cleaned) in (2, 3):
+        return cleaned.upper()
+    if re.fullmatch(r"[A-Za-z][A-Za-z \-]*", cleaned):
+        return " ".join(part.capitalize() for part in cleaned.split())
+    return None
+
+
+def first_valid_language(*values: Any) -> str | None:
+    for value in values:
+        normalized = normalize_language_value(value)
+        if normalized:
+            return normalized
+    return None
+
+
 def _normalize_publisher_object(value: Any) -> dict[str, str] | None:
     if not isinstance(value, dict):
         return None
@@ -135,9 +167,7 @@ def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
             authors = [str(v.get("name", "")).strip() for v in creator_nodes if isinstance(v, dict) and str(v.get("name", "")).strip()]
 
     subjects = [str(v).strip() for v in _as_list(raw.get("subjects") or raw.get("keywords") or metadata.get("subject")) if str(v).strip()]
-    language = _first_str(raw.get("language"), raw.get("lang"), metadata.get("language"))
-    if language is None:
-        language = _first_str(*[str(v) for v in _as_list(metadata.get("language"))])
+    language = first_valid_language(raw.get("language"), raw.get("lang"), metadata.get("language"))
     published_candidate = _first_str(
         raw.get("published"),
         raw.get("publication_date"),
@@ -219,7 +249,7 @@ def normalize_oai_record(fields: dict[str, list[str]]) -> NormalizedPublication 
         publication_id=identifier,
         title=title,
         authors=[v for v in fields.get("creator", []) if v],
-        language=_first_str(*fields.get("language", [])),
+        language=first_valid_language(fields.get("language", [])),
         publisher=_first_str(*fields.get("publisher", [])),
         published=_first_str(*fields.get("date", []), *fields.get("datestamp", [])),
         identifier=identifier,

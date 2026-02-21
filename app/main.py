@@ -14,7 +14,13 @@ from app.harvest import run_incremental_for_all_checkpoints
 from app.scheduler import IncrementalHarvestScheduler
 from app.sources import iter_json_records, iter_json_records_from_url, load_oai_dc_records
 from app.store import IngestResult, PublicationStore
-from app.transform import first_valid_publisher, normalize_json_record, normalize_oai_record, primary_publisher_name
+from app.transform import (
+    first_valid_publisher,
+    normalize_json_record,
+    normalize_language_value,
+    normalize_oai_record,
+    primary_publisher_name,
+)
 from app.validation import validate_palace_opds_feed
 
 app = FastAPI(title="OAPEN OPDS Feed Generator", version="0.1.0")
@@ -188,6 +194,9 @@ def _ingest_oai(request: OaiIngestRequest) -> IngestResult:
 
 
 def _to_opds_publication(pub, base_url: str | None = None) -> dict:
+    def without_none_values(value: dict) -> dict:
+        return {key: item for key, item in value.items() if item is not None}
+
     def to_rfc3339(value: str | None) -> str | None:
         if not value:
             return None
@@ -272,16 +281,19 @@ def _to_opds_publication(pub, base_url: str | None = None) -> dict:
         raw_description = raw.get("description")
         description = raw_description if isinstance(raw_description, str) and raw_description.strip() else None
 
-    metadata = {
+    metadata = without_none_values(
+        {
         "@type": "http://schema.org/Book",
         "title": pub.title,
         "identifier": pub.identifier or pub.publication_id,
-        "language": pub.language,
         "modified": modified,
         "published": modified,
         "author": author,
         "subject": subject,
-    }
+        }
+    )
+    if pub.language:
+        metadata["language"] = pub.language
 
     publisher = first_valid_publisher(raw.get("publisher"), metadata_src.get("publisher"), metadata_src.get("imprint"), pub.publisher)
     if publisher and pub.publisher_slug:
@@ -585,11 +597,14 @@ def opds_language_feed(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
 ) -> dict:
-    total, subset = store.page_by_language(language=language_code, page=page, page_size=page_size)
+    normalized_language = normalize_language_value(language_code)
+    if normalized_language is None:
+        raise HTTPException(status_code=400, detail="language_code must be a 2-letter code, 3-letter code, or language name.")
+    total, subset = store.page_by_language(language=normalized_language, page=page, page_size=page_size)
     return _build_feed_response(
         request=request,
-        title=f"OAPEN Language: {_language_label(language_code)}",
-        path=f"/opds/languages/{language_code}",
+        title=f"OAPEN Language: {_language_label(normalized_language)}",
+        path=f"/opds/languages/{normalized_language}",
         page=page,
         page_size=page_size,
         total=total,
