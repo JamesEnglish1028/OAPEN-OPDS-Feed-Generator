@@ -22,4 +22,5 @@ class NormalizedPublication:
     series_slug: str | None = None
     series_position: int | None = None
     publisher_slug: str | None = None
+    publication_year: int | None = None
     raw: dict[str, Any] = field(default_factory=dict)

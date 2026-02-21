@@ -259,14 +259,7 @@ def _to_opds_publication(pub, base_url: str | None = None) -> dict:
     if series_entry:
         belongs_to_obj["series"] = series_entry
     if collection_value:
-        collection_slug = pub.collection_slug
-        href = f"/opds/collections/{collection_slug}" if collection_slug else None
-        if base_url and href:
-            href = f"{base_url}{href}"
-        collection_object = {"name": collection_value}
-        if href:
-            collection_object["links"] = [{"href": href, "type": "application/opds+json"}]
-        belongs_to_obj["collection"] = collection_object
+        belongs_to_obj["collection"] = collection_value
     if belongs_to_obj:
         metadata["belongsTo"] = belongs_to_obj
     if alt_identifiers:
@@ -426,16 +419,16 @@ def opds_feed(
         subset=subset,
     )
 
-    collections = store.list_collection_counts()
     languages = store.list_language_counts()
+    year_counts = store.list_publication_year_counts()
     response["navigation"] = [
         {
-            "href": _build_url(request, f"/opds/collections/{item['slug']}", {}),
-            "title": f"Collection: {item['name']}",
+            "href": _build_url(request, f"/opds/years/{item['year']}", {}),
+            "title": f"Publication Year: {item['year']}",
             "type": "application/opds+json",
             "rel": "subsection",
         }
-        for item in collections
+        for item in year_counts
     ]
     response["facets"] = [
         {
@@ -466,6 +459,25 @@ def opds_collection_feed(
         request=request,
         title=f"OAPEN Collection: {collection_slug}",
         path=f"/opds/collections/{collection_slug}",
+        page=page,
+        page_size=page_size,
+        total=total,
+        subset=subset,
+    )
+
+
+@app.get("/opds/years/{year}")
+def opds_year_feed(
+    year: int,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    total, subset = store.page_by_publication_year(year=year, page=page, page_size=page_size)
+    return _build_feed_response(
+        request=request,
+        title=f"OAPEN Publication Year: {year}",
+        path=f"/opds/years/{year}",
         page=page,
         page_size=page_size,
         total=total,

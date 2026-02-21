@@ -46,6 +46,16 @@ def _slugify(value: str | None) -> str | None:
     return slug or None
 
 
+def _extract_publication_year(value: str | None) -> int | None:
+    if not value:
+        return None
+    match = re.search(r"\b(19\d{2}|20\d{2}|21\d{2})\b", value)
+    if not match:
+        return None
+    year = int(match.group(1))
+    return year if 1900 <= year <= 2199 else None
+
+
 def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
     metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
     identifier = _first_str(
@@ -80,6 +90,7 @@ def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
     if language is None:
         language = _first_str(*[str(v) for v in _as_list(metadata.get("language"))])
     published = _first_str(raw.get("published"), raw.get("publication_date"), raw.get("date"), metadata.get("published"), metadata.get("modified"))
+    publication_year = _extract_publication_year(published)
     publisher_value = _first_str(raw.get("publisher"), metadata.get("publisher"), metadata.get("imprint"))
     funders = [str(v).strip() for v in _as_list(metadata.get("funder")) if isinstance(v, str) and str(v).strip()]
     collection = funders[0] if funders else None
@@ -115,6 +126,7 @@ def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
         series_slug=_slugify(series_name),
         series_position=series_position,
         publisher_slug=_slugify(_first_str(raw.get("publisher"), metadata.get("publisher"), metadata.get("imprint"))),
+        publication_year=publication_year,
         raw=raw,
     )
 
@@ -157,5 +169,6 @@ def normalize_oai_record(fields: dict[str, list[str]]) -> NormalizedPublication 
         series_slug=None,
         series_position=None,
         publisher_slug=_slugify(_first_str(*fields.get("publisher", []))),
+        publication_year=_extract_publication_year(_first_str(*fields.get("date", []), *fields.get("datestamp", []))),
         raw={k: v for k, v in fields.items()},
     )

@@ -18,10 +18,10 @@ Small service that ingests OAPEN metadata (JSON or OAI-PMH Dublin Core) and expo
 - Single publication endpoint (`GET /publications/{id}`)
 - Palace-oriented OPDS profile validation (`GET /validate/palace`)
 - OAPEN metadata extensions mapped into OPDS output (`belongsTo`, `images`, `altIdentifier`, `accessibility`)
-- Root OPDS navigation links (`rel: subsection`) for all collection feeds
+- Root OPDS navigation links (`rel: subsection`) for publication year feeds
 - OPDS language facet compact collection (`facets`) with `numberOfItems`
 - `metadata.publisher.links` points to publisher-specific OPDS subfeeds
-- `metadata.belongsTo.collection` includes `name` + `links` (from funder mapping)
+- `metadata.belongsTo.collection` is mapped from funder as a string value
 - Persistent storage with `DATABASE_URL` (SQLite default, PostgreSQL supported)
 - Harvest checkpoint visibility (`GET /harvest/checkpoints`)
 - Alembic migration/versioning for schema changes
@@ -105,6 +105,12 @@ Collection feed:
 
 ```bash
 curl "http://127.0.0.1:8000/opds/collections/scifi-classics?page=1&page_size=25"
+```
+
+Publication year feed:
+
+```bash
+curl "http://127.0.0.1:8000/opds/years/2026?page=1&page_size=25"
 ```
 
 Language feed:

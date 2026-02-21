@@ -39,6 +39,8 @@ def test_ingest_json_and_opds_pagination() -> None:
     assert "navigation" in page_1_json
     assert "facets" in page_1_json
     assert page_1_json["facets"][0]["metadata"]["title"] == "Language"
+    assert page_1_json["navigation"][0]["href"].endswith("/opds/years/2026")
+    assert page_1_json["navigation"][0]["title"] == "Publication Year: 2026"
 
     feed_page_2 = client.get("/opds?page=2&page_size=1")
     assert feed_page_2.status_code == 200
@@ -66,8 +68,7 @@ def test_get_single_publication() -> None:
     assert enriched_payload["metadata"]["belongsTo"]["series"]["name"] == "Demo Series"
     assert enriched_payload["metadata"]["belongsTo"]["series"]["position"] == 12
     assert enriched_payload["metadata"]["belongsTo"]["series"]["links"][0]["href"].endswith("/opds/series/demo-series")
-    assert enriched_payload["metadata"]["belongsTo"]["collection"]["name"] == "SciFi Classics"
-    assert enriched_payload["metadata"]["belongsTo"]["collection"]["links"][0]["href"].endswith("/opds/collections/scifi-classics")
+    assert enriched_payload["metadata"]["belongsTo"]["collection"] == "SciFi Classics"
     assert enriched_payload["metadata"]["publisher"]["links"][0]["href"].endswith("/opds/publishers/oapen-press")
     assert all(value is not None for value in enriched_payload["metadata"]["belongsTo"]["series"].values())
     assert enriched_payload["metadata"]["altIdentifier"][0] == "https://doi.org/10.1234/example-doi"
@@ -158,16 +159,16 @@ def test_collection_and_language_subfeeds() -> None:
     ingest = client.post("/ingest/json", json={"path": str(sample_path)})
     assert ingest.status_code == 200
 
-    collections_feed = client.get("/opds/collections/scifi-classics?page=1&page_size=10")
-    assert collections_feed.status_code == 200
-    collection_json = collections_feed.json()
-    assert collection_json["metadata"]["numberOfItems"] == 1
-    assert collection_json["publications"][0]["metadata"]["title"] == "Open Access Book Three"
-
     language_feed = client.get("/opds/languages/en?page=1&page_size=10")
     assert language_feed.status_code == 200
     language_json = language_feed.json()
     assert language_json["metadata"]["numberOfItems"] == 2
+
+    year_feed = client.get("/opds/years/2026?page=1&page_size=10")
+    assert year_feed.status_code == 200
+    year_json = year_feed.json()
+    assert year_json["metadata"]["numberOfItems"] == 1
+    assert year_json["publications"][0]["metadata"]["title"] == "Open Access Book Three"
 
     publisher_feed = client.get("/opds/publishers/oapen-press?page=1&page_size=10")
     assert publisher_feed.status_code == 200
