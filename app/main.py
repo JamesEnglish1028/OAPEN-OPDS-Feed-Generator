@@ -192,21 +192,38 @@ def _to_opds_publication(pub) -> dict:
         if isinstance(item, str) and item.strip():
             belongs_to.append({"name": item.strip(), "series": item.strip()})
         elif isinstance(item, dict):
-            # Preserve OAPEN belongsTo structure, while also exposing OPDS-friendly keys.
-            collection = dict(item)
-            series_value = item.get("series")
-            if isinstance(series_value, str) and series_value.strip():
-                collection.setdefault("name", series_value.strip())
-            elif isinstance(item.get("name"), str) and item["name"].strip():
-                collection.setdefault("name", item["name"].strip())
+            # Preserve OAPEN belongsTo structure, but drop null/empty properties.
+            collection = {}
+            for key, value in item.items():
+                if value is None:
+                    continue
+                if isinstance(value, str):
+                    stripped = value.strip()
+                    if stripped:
+                        collection[key] = stripped
+                    continue
+                if isinstance(value, list) and not value:
+                    continue
+                if isinstance(value, dict) and not value:
+                    continue
+                collection[key] = value
 
-            series_number = item.get("seriesNumber")
-            if isinstance(series_number, str) and series_number.strip():
-                collection.setdefault("position", series_number.strip())
-            elif isinstance(series_number, int):
-                collection.setdefault("position", str(series_number))
+            series_value = collection.get("series")
+            if isinstance(series_value, str) and series_value:
+                collection.setdefault("name", series_value)
+            elif isinstance(collection.get("name"), str) and collection["name"]:
+                collection.setdefault("series", collection["name"])
 
-            belongs_to.append(collection)
+            series_number = collection.get("seriesNumber")
+            if isinstance(series_number, int):
+                series_number = str(series_number)
+                collection["seriesNumber"] = series_number
+            if isinstance(series_number, str) and series_number:
+                collection.setdefault("position", series_number)
+
+            # Omit meaningless belongsTo objects with no usable series/name.
+            if collection.get("series") or collection.get("name"):
+                belongs_to.append(collection)
 
     accessibility = []
     for item in _as_list(metadata_src.get("accessibility")):
@@ -216,24 +233,31 @@ def _to_opds_publication(pub) -> dict:
     author = [{"name": name} for name in pub.authors] if pub.authors else []
     subject = [{"name": value} for value in pub.subjects] if pub.subjects else []
 
-    return {
-        "metadata": {
-            "@type": "http://schema.org/Book",
-            "title": pub.title,
-            "identifier": pub.identifier or pub.publication_id,
-            "language": pub.language,
-            "modified": modified,
-            "published": modified,
-            "author": author,
-            "subject": subject,
-            "publisher": {"name": pub.publisher} if pub.publisher else None,
-            "belongsTo": belongs_to,
-            "altIdentifier": alt_identifiers,
-            "accessibility": accessibility,
-        },
-        "links": links,
-        "images": image_links,
+    metadata = {
+        "@type": "http://schema.org/Book",
+        "title": pub.title,
+        "identifier": pub.identifier or pub.publication_id,
+        "language": pub.language,
+        "modified": modified,
+        "published": modified,
+        "author": author,
+        "subject": subject,
+        "publisher": {"name": pub.publisher} if pub.publisher else None,
     }
+    if belongs_to:
+        metadata["belongsTo"] = belongs_to
+    if alt_identifiers:
+        metadata["altIdentifier"] = alt_identifiers
+    if accessibility:
+        metadata["accessibility"] = accessibility
+
+    publication = {
+        "metadata": metadata,
+        "links": links,
+    }
+    if image_links:
+        publication["images"] = image_links
+    return publication
 
 
 def _build_url(request: Request, path: str, params: dict[str, str | int]) -> str:

@@ -54,6 +54,7 @@ def test_get_single_publication() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["metadata"]["title"] == "Open Access Book One"
+    assert "belongsTo" not in payload["metadata"]
 
     enriched = client.get("/publications/book-3")
     assert enriched.status_code == 200
@@ -62,6 +63,7 @@ def test_get_single_publication() -> None:
     assert enriched_payload["metadata"]["belongsTo"][0]["series"] == "Demo Series"
     assert enriched_payload["metadata"]["belongsTo"][0]["seriesNumber"] == "12"
     assert enriched_payload["metadata"]["belongsTo"][0]["position"] == "12"
+    assert all(value is not None for value in enriched_payload["metadata"]["belongsTo"][0].values())
     assert enriched_payload["metadata"]["altIdentifier"][0] == "https://doi.org/10.1234/example-doi"
     assert "urn:isbn:9780000000001" in enriched_payload["metadata"]["altIdentifier"]
     assert enriched_payload["images"][0]["href"] == "https://example.org/book-3-cover.jpg"
