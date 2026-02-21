@@ -47,6 +47,11 @@ class PublicationRow(Base):
     subjects_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     links_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     source: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
+    collection: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    collection_slug: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    series_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    series_slug: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    series_position: Mapped[int | None] = mapped_column(nullable=True)
     raw_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -88,6 +93,11 @@ class PublicationStore:
             "subjects_json": json.dumps(pub.subjects, ensure_ascii=True),
             "links_json": json.dumps(pub.links, ensure_ascii=True),
             "source": pub.source,
+            "collection": pub.collection,
+            "collection_slug": pub.collection_slug,
+            "series_name": pub.series_name,
+            "series_slug": pub.series_slug,
+            "series_position": pub.series_position,
             "raw_json": json.dumps(pub.raw, ensure_ascii=True),
             "updated_at": datetime.now(UTC),
         }
@@ -126,6 +136,76 @@ class PublicationStore:
             statement = select(PublicationRow).order_by(PublicationRow.publication_id.asc()).offset(offset).limit(page_size)
             rows = session.scalars(statement).all()
             return total, [self._to_publication(row) for row in rows]
+
+    def page_by_collection_slug(self, collection_slug: str, page: int, page_size: int) -> tuple[int, list[NormalizedPublication]]:
+        offset = (page - 1) * page_size
+        with self._session() as session:
+            total = session.scalar(
+                select(sqla_func.count()).select_from(PublicationRow).where(PublicationRow.collection_slug == collection_slug)
+            ) or 0
+            statement = (
+                select(PublicationRow)
+                .where(PublicationRow.collection_slug == collection_slug)
+                .order_by(PublicationRow.publication_id.asc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            rows = session.scalars(statement).all()
+            return total, [self._to_publication(row) for row in rows]
+
+    def page_by_language(self, language: str, page: int, page_size: int) -> tuple[int, list[NormalizedPublication]]:
+        offset = (page - 1) * page_size
+        with self._session() as session:
+            total = session.scalar(
+                select(sqla_func.count()).select_from(PublicationRow).where(PublicationRow.language == language)
+            ) or 0
+            statement = (
+                select(PublicationRow)
+                .where(PublicationRow.language == language)
+                .order_by(PublicationRow.publication_id.asc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            rows = session.scalars(statement).all()
+            return total, [self._to_publication(row) for row in rows]
+
+    def page_by_series_slug(self, series_slug: str, page: int, page_size: int) -> tuple[int, list[NormalizedPublication]]:
+        offset = (page - 1) * page_size
+        with self._session() as session:
+            total = session.scalar(
+                select(sqla_func.count()).select_from(PublicationRow).where(PublicationRow.series_slug == series_slug)
+            ) or 0
+            statement = (
+                select(PublicationRow)
+                .where(PublicationRow.series_slug == series_slug)
+                .order_by(PublicationRow.series_position.asc().nullslast(), PublicationRow.publication_id.asc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            rows = session.scalars(statement).all()
+            return total, [self._to_publication(row) for row in rows]
+
+    def list_collection_counts(self) -> list[dict[str, str | int]]:
+        with self._session() as session:
+            statement = (
+                select(PublicationRow.collection_slug, PublicationRow.collection, sqla_func.count(PublicationRow.publication_id))
+                .where(PublicationRow.collection_slug.is_not(None))
+                .group_by(PublicationRow.collection_slug, PublicationRow.collection)
+                .order_by(PublicationRow.collection.asc())
+            )
+            rows = session.execute(statement).all()
+            return [{"slug": slug, "name": name, "count": count} for slug, name, count in rows if slug and name]
+
+    def list_language_counts(self) -> list[dict[str, str | int]]:
+        with self._session() as session:
+            statement = (
+                select(PublicationRow.language, sqla_func.count(PublicationRow.publication_id))
+                .where(PublicationRow.language.is_not(None))
+                .group_by(PublicationRow.language)
+                .order_by(PublicationRow.language.asc())
+            )
+            rows = session.execute(statement).all()
+            return [{"code": code, "count": count} for code, count in rows if code]
 
     def count(self) -> int:
         with self._session() as session:
@@ -216,5 +296,10 @@ class PublicationStore:
             subjects=json.loads(row.subjects_json or "[]"),
             links=json.loads(row.links_json or "[]"),
             source=row.source,
+            collection=row.collection,
+            collection_slug=row.collection_slug,
+            series_name=row.series_name,
+            series_slug=row.series_slug,
+            series_position=row.series_position,
             raw=json.loads(row.raw_json or "{}"),
         )

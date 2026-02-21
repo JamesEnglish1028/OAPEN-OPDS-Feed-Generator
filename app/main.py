@@ -55,6 +55,26 @@ def _as_list(value):
     return [value]
 
 
+LANGUAGE_LABELS = {
+    "en": "English",
+    "eng": "English",
+    "fr": "French",
+    "fre": "French",
+    "de": "German",
+    "ger": "German",
+    "es": "Spanish",
+    "spa": "Spanish",
+    "it": "Italian",
+    "ita": "Italian",
+    "nl": "Dutch",
+    "nld": "Dutch",
+    "pt": "Portuguese",
+    "por": "Portuguese",
+    "sv": "Swedish",
+    "swe": "Swedish",
+}
+
+
 def _checkpoint_key(base_url: str, metadata_prefix: str, set_name: str | None) -> str:
     return f"{base_url}|{metadata_prefix}|{set_name or 'default'}"
 
@@ -187,60 +207,17 @@ def _to_opds_publication(pub) -> dict:
         if isinstance(isbn, str) and isbn.strip():
             alt_identifiers.append(f"urn:isbn:{isbn.strip()}")
 
-    series_entries = []
-    belongs_to_source = metadata_src.get("belongsTo")
-    if belongs_to_source is None:
-        belongs_to_source = raw.get("belongsTo")
-
-    for item in _as_list(belongs_to_source):
-        if isinstance(item, str) and item.strip():
-            series_entries.append({"name": item.strip()})
-        elif isinstance(item, dict):
-            # Preserve OAPEN belongsTo structure, but drop null/empty properties.
-            collection = {}
-            for key, value in item.items():
-                if value is None:
-                    continue
-                if isinstance(value, str):
-                    stripped = value.strip()
-                    if stripped:
-                        collection[key] = stripped
-                    continue
-                if isinstance(value, list) and not value:
-                    continue
-                if isinstance(value, dict) and not value:
-                    continue
-                collection[key] = value
-
-            series_value = collection.get("series")
-            if isinstance(series_value, str) and series_value:
-                collection.setdefault("name", series_value)
-            elif isinstance(collection.get("name"), str) and collection["name"]:
-                series_value = collection["name"]
-            else:
-                series_value = None
-
-            series_number = collection.get("seriesNumber")
-            if isinstance(series_number, int):
-                series_number = str(series_number)
-            entry: dict[str, str | int] = {}
-            if isinstance(series_value, str) and series_value:
-                entry["name"] = series_value
-            if isinstance(series_number, str) and series_number:
-                if series_number.isdigit():
-                    entry["position"] = int(series_number)
-                else:
-                    entry["position"] = series_number
-            # Omit meaningless entries with no usable series name.
-            if "name" in entry:
-                series_entries.append(entry)
+    series_entry = None
+    if pub.series_name:
+        series_entry = {"name": pub.series_name}
+        if pub.series_position is not None:
+            series_entry["position"] = pub.series_position
+        if pub.series_slug:
+            series_entry["links"] = [{"href": f"/opds/series/{pub.series_slug}", "type": "application/opds+json"}]
 
     collection_value = None
-    funder_source = metadata_src.get("funder")
-    for item in _as_list(funder_source):
-        if isinstance(item, str) and item.strip():
-            collection_value = item.strip()
-            break
+    if pub.collection:
+        collection_value = pub.collection
 
     accessibility = []
     for item in _as_list(metadata_src.get("accessibility")):
@@ -269,8 +246,8 @@ def _to_opds_publication(pub) -> dict:
     if description:
         metadata["description"] = description
     belongs_to_obj = {}
-    if series_entries:
-        belongs_to_obj["series"] = series_entries[0]
+    if series_entry:
+        belongs_to_obj["series"] = series_entry
     if collection_value:
         belongs_to_obj["collection"] = collection_value
     if belongs_to_obj:
@@ -293,6 +270,53 @@ def _build_url(request: Request, path: str, params: dict[str, str | int]) -> str
     base = str(request.base_url).rstrip("/")
     query = urlencode(params)
     return f"{base}{path}?{query}" if query else f"{base}{path}"
+
+
+def _language_label(code: str) -> str:
+    return LANGUAGE_LABELS.get(code.lower(), code.upper())
+
+
+def _build_feed_response(
+    request: Request,
+    title: str,
+    path: str,
+    page: int,
+    page_size: int,
+    total: int,
+    subset,
+) -> dict:
+    end = (page - 1) * page_size + len(subset)
+    publications = [_to_opds_publication(pub) for pub in subset]
+
+    links = [{"rel": "self", "href": _build_url(request, path, {"page": page, "page_size": page_size}), "type": "application/opds+json"}]
+    if end < total:
+        links.append(
+            {
+                "rel": "next",
+                "href": _build_url(request, path, {"page": page + 1, "page_size": page_size}),
+                "type": "application/opds+json",
+            }
+        )
+    if page > 1:
+        links.append(
+            {
+                "rel": "previous",
+                "href": _build_url(request, path, {"page": page - 1, "page_size": page_size}),
+                "type": "application/opds+json",
+            }
+        )
+
+    return {
+        "metadata": {
+            "@type": "http://schema.org/DataFeed",
+            "title": title,
+            "numberOfItems": total,
+            "itemsPerPage": page_size,
+            "currentPage": page,
+        },
+        "links": links,
+        "publications": publications,
+    }
 
 
 @app.get("/health")
@@ -374,40 +398,99 @@ def opds_feed(
     page_size: int = Query(default=50, ge=1, le=500),
 ) -> dict:
     total, subset = store.page(page=page, page_size=page_size)
-    end = (page - 1) * page_size + len(subset)
-    publications = [_to_opds_publication(pub) for pub in subset]
+    response = _build_feed_response(
+        request=request,
+        title="OAPEN OPDS Catalog",
+        path="/opds",
+        page=page,
+        page_size=page_size,
+        total=total,
+        subset=subset,
+    )
 
-    links = [
-        {"rel": "self", "href": _build_url(request, "/opds", {"page": page, "page_size": page_size}), "type": "application/opds+json"}
+    collections = store.list_collection_counts()
+    languages = store.list_language_counts()
+    response["navigation"] = [
+        {
+            "href": f"/opds/collections/{item['slug']}",
+            "title": f"Collection: {item['name']}",
+            "type": "application/opds+json",
+            "rel": "subsection",
+        }
+        for item in collections
     ]
-    if end < total:
-        links.append(
-            {
-                "rel": "next",
-                "href": _build_url(request, "/opds", {"page": page + 1, "page_size": page_size}),
-                "type": "application/opds+json",
-            }
-        )
-    if page > 1:
-        links.append(
-            {
-                "rel": "previous",
-                "href": _build_url(request, "/opds", {"page": page - 1, "page_size": page_size}),
-                "type": "application/opds+json",
-            }
-        )
+    response["facets"] = [
+        {
+            "metadata": {"title": "Language"},
+            "links": [
+                {
+                    "href": f"/opds/languages/{item['code']}",
+                    "type": "application/opds+json",
+                    "title": _language_label(str(item["code"])),
+                    "properties": {"numberOfItems": int(item["count"])},
+                }
+                for item in languages
+            ],
+        }
+    ]
+    return response
 
-    return {
-        "metadata": {
-            "@type": "http://schema.org/DataFeed",
-            "title": "OAPEN OPDS Catalog",
-            "numberOfItems": total,
-            "itemsPerPage": page_size,
-            "currentPage": page,
-        },
-        "links": links,
-        "publications": publications,
-    }
+
+@app.get("/opds/collections/{collection_slug}")
+def opds_collection_feed(
+    collection_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    total, subset = store.page_by_collection_slug(collection_slug=collection_slug, page=page, page_size=page_size)
+    return _build_feed_response(
+        request=request,
+        title=f"OAPEN Collection: {collection_slug}",
+        path=f"/opds/collections/{collection_slug}",
+        page=page,
+        page_size=page_size,
+        total=total,
+        subset=subset,
+    )
+
+
+@app.get("/opds/languages/{language_code}")
+def opds_language_feed(
+    language_code: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    total, subset = store.page_by_language(language=language_code, page=page, page_size=page_size)
+    return _build_feed_response(
+        request=request,
+        title=f"OAPEN Language: {_language_label(language_code)}",
+        path=f"/opds/languages/{language_code}",
+        page=page,
+        page_size=page_size,
+        total=total,
+        subset=subset,
+    )
+
+
+@app.get("/opds/series/{series_slug}")
+def opds_series_feed(
+    series_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    total, subset = store.page_by_series_slug(series_slug=series_slug, page=page, page_size=page_size)
+    return _build_feed_response(
+        request=request,
+        title=f"OAPEN Series: {series_slug}",
+        path=f"/opds/series/{series_slug}",
+        page=page,
+        page_size=page_size,
+        total=total,
+        subset=subset,
+    )
 
 
 @app.get("/publications/{publication_id}")

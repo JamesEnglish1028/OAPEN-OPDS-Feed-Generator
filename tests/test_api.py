@@ -36,6 +36,9 @@ def test_ingest_json_and_opds_pagination() -> None:
     assert len(page_1_json["publications"]) == 1
     rels = [link["rel"] for link in page_1_json["links"]]
     assert "next" in rels
+    assert "navigation" in page_1_json
+    assert "facets" in page_1_json
+    assert page_1_json["facets"][0]["metadata"]["title"] == "Language"
 
     feed_page_2 = client.get("/opds?page=2&page_size=1")
     assert feed_page_2.status_code == 200
@@ -62,6 +65,7 @@ def test_get_single_publication() -> None:
     assert enriched_payload["metadata"]["description"] == "A demonstration title with belongsTo and accessibility metadata."
     assert enriched_payload["metadata"]["belongsTo"]["series"]["name"] == "Demo Series"
     assert enriched_payload["metadata"]["belongsTo"]["series"]["position"] == 12
+    assert enriched_payload["metadata"]["belongsTo"]["series"]["links"][0]["href"] == "/opds/series/demo-series"
     assert enriched_payload["metadata"]["belongsTo"]["collection"] == "SciFi Classics"
     assert all(value is not None for value in enriched_payload["metadata"]["belongsTo"]["series"].values())
     assert enriched_payload["metadata"]["altIdentifier"][0] == "https://doi.org/10.1234/example-doi"
@@ -144,3 +148,21 @@ def test_manual_harvest_run_endpoint(monkeypatch) -> None:
     payload = response.json()
     assert payload["checkpoints_total"] == 0
     assert payload["max_records"] == 20
+
+
+def test_collection_and_language_subfeeds() -> None:
+    _reset_store()
+    sample_path = Path(__file__).parent / "data" / "sample_oapen.json"
+    ingest = client.post("/ingest/json", json={"path": str(sample_path)})
+    assert ingest.status_code == 200
+
+    collections_feed = client.get("/opds/collections/scifi-classics?page=1&page_size=10")
+    assert collections_feed.status_code == 200
+    collection_json = collections_feed.json()
+    assert collection_json["metadata"]["numberOfItems"] == 1
+    assert collection_json["publications"][0]["metadata"]["title"] == "Open Access Book Three"
+
+    language_feed = client.get("/opds/languages/en?page=1&page_size=10")
+    assert language_feed.status_code == 200
+    language_json = language_feed.json()
+    assert language_json["metadata"]["numberOfItems"] == 2

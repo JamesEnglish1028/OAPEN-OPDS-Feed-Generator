@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from typing import Any
 
 from app.models import NormalizedPublication
@@ -38,6 +39,13 @@ def _normalize_links(raw: dict[str, Any]) -> list[dict[str, Any]]:
     return normalized
 
 
+def _slugify(value: str | None) -> str | None:
+    if not value:
+        return None
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or None
+
+
 def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
     metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
     identifier = _first_str(
@@ -72,6 +80,19 @@ def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
     if language is None:
         language = _first_str(*[str(v) for v in _as_list(metadata.get("language"))])
     published = _first_str(raw.get("published"), raw.get("publication_date"), raw.get("date"), metadata.get("published"), metadata.get("modified"))
+    funders = [str(v).strip() for v in _as_list(metadata.get("funder")) if isinstance(v, str) and str(v).strip()]
+    collection = funders[0] if funders else None
+
+    belongs_to = metadata.get("belongsTo")
+    series_name: str | None = None
+    series_position: int | None = None
+    if isinstance(belongs_to, dict):
+        series_name = _first_str(belongs_to.get("series"), belongs_to.get("name"))
+        raw_series_position = belongs_to.get("seriesNumber")
+        if isinstance(raw_series_position, int):
+            series_position = raw_series_position
+        elif isinstance(raw_series_position, str) and raw_series_position.strip().isdigit():
+            series_position = int(raw_series_position.strip())
 
     return NormalizedPublication(
         publication_id=identifier,
@@ -84,6 +105,11 @@ def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
         subjects=subjects,
         links=_normalize_links(raw),
         source="json",
+        collection=collection,
+        collection_slug=_slugify(collection),
+        series_name=series_name,
+        series_slug=_slugify(series_name),
+        series_position=series_position,
         raw=raw,
     )
 
@@ -120,5 +146,10 @@ def normalize_oai_record(fields: dict[str, list[str]]) -> NormalizedPublication 
         subjects=[v for v in fields.get("subject", []) if v],
         links=links,
         source="oai-pmh",
+        collection=None,
+        collection_slug=None,
+        series_name=None,
+        series_slug=None,
+        series_position=None,
         raw={k: v for k, v in fields.items()},
     )

@@ -16,4 +16,9 @@ class NormalizedPublication:
     subjects: list[str] = field(default_factory=list)
     links: list[dict[str, Any]] = field(default_factory=list)
     source: str = "unknown"
+    collection: str | None = None
+    collection_slug: str | None = None
+    series_name: str | None = None
+    series_slug: str | None = None
+    series_position: int | None = None
     raw: dict[str, Any] = field(default_factory=dict)
