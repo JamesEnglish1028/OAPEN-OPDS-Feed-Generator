@@ -14,7 +14,7 @@ from app.harvest import run_incremental_for_all_checkpoints
 from app.scheduler import IncrementalHarvestScheduler
 from app.sources import iter_json_records, iter_json_records_from_url, load_oai_dc_records
 from app.store import IngestResult, PublicationStore
-from app.transform import normalize_json_record, normalize_oai_record
+from app.transform import first_valid_publisher, normalize_json_record, normalize_oai_record, primary_publisher_name
 from app.validation import validate_palace_opds_feed
 
 app = FastAPI(title="OAPEN OPDS Feed Generator", version="0.1.0")
@@ -281,15 +281,30 @@ def _to_opds_publication(pub, base_url: str | None = None) -> dict:
         "published": modified,
         "author": author,
         "subject": subject,
-        "publisher": {"name": pub.publisher} if pub.publisher else None,
     }
-    if pub.publisher and pub.publisher_slug:
-        metadata["publisher"]["links"] = [
-            {
-                "href": f"{base_url}/opds/publishers/{pub.publisher_slug}" if base_url else f"/opds/publishers/{pub.publisher_slug}",
-                "type": "application/opds+json",
-            }
-        ]
+
+    publisher = first_valid_publisher(raw.get("publisher"), metadata_src.get("publisher"), metadata_src.get("imprint"), pub.publisher)
+    if publisher and pub.publisher_slug:
+        publisher_link = {
+            "href": f"{base_url}/opds/publishers/{pub.publisher_slug}" if base_url else f"/opds/publishers/{pub.publisher_slug}",
+            "type": "application/opds+json",
+        }
+        if isinstance(publisher, str):
+            publisher = {"name": publisher, "links": [publisher_link]}
+        elif isinstance(publisher, dict):
+            publisher = {**publisher, "links": [publisher_link]}
+        elif isinstance(publisher, list):
+            primary_name = primary_publisher_name(publisher)
+            linked_publishers = []
+            for item in publisher:
+                if item.get("name") == primary_name:
+                    linked_publishers.append({**item, "links": [publisher_link]})
+                else:
+                    linked_publishers.append(item)
+            publisher = linked_publishers
+    if publisher:
+        metadata["publisher"] = publisher
+
     if description:
         metadata["description"] = description
     belongs_to_obj = {}

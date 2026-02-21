@@ -22,6 +22,52 @@ def _first_str(*values: Any) -> str | None:
     return None
 
 
+def _normalize_publisher_object(value: Any) -> dict[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    name = _first_str(value.get("name"))
+    if not name:
+        name = _first_str(value.get("label"), value.get("title"))
+    if not name:
+        return None
+    return {"name": name}
+
+
+def normalize_publisher_value(value: Any) -> str | dict[str, str] | list[dict[str, str]] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned or None
+    if isinstance(value, dict):
+        return _normalize_publisher_object(value)
+    if isinstance(value, list):
+        cleaned = [_normalize_publisher_object(item) for item in value]
+        out = [item for item in cleaned if item is not None]
+        return out or None
+    return None
+
+
+def first_valid_publisher(*values: Any) -> str | dict[str, str] | list[dict[str, str]] | None:
+    for value in values:
+        normalized = normalize_publisher_value(value)
+        if normalized is not None:
+            return normalized
+    return None
+
+
+def primary_publisher_name(value: str | dict[str, str] | list[dict[str, str]] | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return value.get("name")
+    if value:
+        return value[0].get("name")
+    return None
+
+
 def _normalize_links(raw: dict[str, Any]) -> list[dict[str, Any]]:
     links = raw.get("links") or raw.get("formats") or raw.get("files") or []
     normalized: list[dict[str, Any]] = []
@@ -107,7 +153,8 @@ def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
         or _extract_publication_year(published)
         or _extract_publication_year(metadata.get("modified"))
     )
-    publisher_value = _first_str(raw.get("publisher"), metadata.get("publisher"), metadata.get("imprint"))
+    publisher_metadata = first_valid_publisher(raw.get("publisher"), metadata.get("publisher"), metadata.get("imprint"))
+    publisher_value = primary_publisher_name(publisher_metadata)
     funders = [str(v).strip() for v in _as_list(metadata.get("funder")) if isinstance(v, str) and str(v).strip()]
     collection = funders[0] if funders else None
     # Keep root navigation funder-based only; do not mirror publisher into collection.
@@ -141,7 +188,7 @@ def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
         series_name=series_name,
         series_slug=_slugify(series_name),
         series_position=series_position,
-        publisher_slug=_slugify(_first_str(raw.get("publisher"), metadata.get("publisher"), metadata.get("imprint"))),
+        publisher_slug=_slugify(publisher_value),
         publication_year=publication_year,
         raw=raw,
     )

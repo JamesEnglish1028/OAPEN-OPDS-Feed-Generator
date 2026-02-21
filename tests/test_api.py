@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 
 os.environ["DATABASE_URL"] = "sqlite:///./test_oapen_opds.db"
@@ -174,3 +175,46 @@ def test_collection_and_language_subfeeds() -> None:
     assert publisher_feed.status_code == 200
     publisher_json = publisher_feed.json()
     assert publisher_json["metadata"]["numberOfItems"] == 3
+
+
+def test_publisher_normalization_for_opds_metadata(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "publisher_cases.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "publications": [
+                    {"id": "pub-string", "title": "Publisher String", "publisher": "  OAPEN Press  "},
+                    {"id": "pub-object", "title": "Publisher Object", "publisher": {"label": "  Label Press  "}},
+                    {
+                        "id": "pub-array",
+                        "title": "Publisher Array",
+                        "publisher": [{"name": " Alpha Press "}, {"title": " Beta Press "}, {"foo": "bar"}, "noise"],
+                    },
+                    {"id": "pub-invalid-object", "title": "Publisher Invalid Object", "publisher": {"foo": "bar"}},
+                    {"id": "pub-empty-string", "title": "Publisher Empty String", "publisher": "   "},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+    assert ingest.json()["accepted"] == 5
+
+    string_pub = client.get("/publications/pub-string").json()
+    assert string_pub["metadata"]["publisher"]["name"] == "OAPEN Press"
+
+    object_pub = client.get("/publications/pub-object").json()
+    assert object_pub["metadata"]["publisher"]["name"] == "Label Press"
+
+    array_pub = client.get("/publications/pub-array").json()
+    assert isinstance(array_pub["metadata"]["publisher"], list)
+    assert [item["name"] for item in array_pub["metadata"]["publisher"]] == ["Alpha Press", "Beta Press"]
+
+    invalid_obj_pub = client.get("/publications/pub-invalid-object").json()
+    assert "publisher" not in invalid_obj_pub["metadata"]
+
+    empty_string_pub = client.get("/publications/pub-empty-string").json()
+    assert "publisher" not in empty_string_pub["metadata"]
