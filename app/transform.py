@@ -80,8 +80,12 @@ def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
     if language is None:
         language = _first_str(*[str(v) for v in _as_list(metadata.get("language"))])
     published = _first_str(raw.get("published"), raw.get("publication_date"), raw.get("date"), metadata.get("published"), metadata.get("modified"))
+    publisher_value = _first_str(raw.get("publisher"), metadata.get("publisher"), metadata.get("imprint"))
     funders = [str(v).strip() for v in _as_list(metadata.get("funder")) if isinstance(v, str) and str(v).strip()]
     collection = funders[0] if funders else None
+    # Keep root navigation funder-based only; do not mirror publisher into collection.
+    if collection and publisher_value and collection.casefold() == publisher_value.casefold():
+        collection = None
 
     belongs_to = metadata.get("belongsTo")
     series_name: str | None = None
@@ -99,7 +103,7 @@ def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
         title=title,
         authors=authors,
         language=language,
-        publisher=_first_str(raw.get("publisher"), metadata.get("publisher"), metadata.get("imprint")),
+        publisher=publisher_value,
         published=published,
         identifier=identifier,
         subjects=subjects,
