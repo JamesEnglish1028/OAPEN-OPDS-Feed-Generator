@@ -246,13 +246,27 @@ def _to_opds_publication(pub, base_url: str | None = None) -> dict:
         "subject": subject,
         "publisher": {"name": pub.publisher} if pub.publisher else None,
     }
+    if pub.publisher and pub.publisher_slug:
+        metadata["publisher"]["links"] = [
+            {
+                "href": f"{base_url}/opds/publishers/{pub.publisher_slug}" if base_url else f"/opds/publishers/{pub.publisher_slug}",
+                "type": "application/opds+json",
+            }
+        ]
     if description:
         metadata["description"] = description
     belongs_to_obj = {}
     if series_entry:
         belongs_to_obj["series"] = series_entry
     if collection_value:
-        belongs_to_obj["collection"] = collection_value
+        collection_slug = pub.collection_slug
+        href = f"/opds/collections/{collection_slug}" if collection_slug else None
+        if base_url and href:
+            href = f"{base_url}{href}"
+        collection_object = {"name": collection_value}
+        if href:
+            collection_object["links"] = [{"href": href, "type": "application/opds+json"}]
+        belongs_to_obj["collection"] = collection_object
     if belongs_to_obj:
         metadata["belongsTo"] = belongs_to_obj
     if alt_identifiers:
@@ -490,6 +504,25 @@ def opds_series_feed(
         request=request,
         title=f"OAPEN Series: {series_slug}",
         path=f"/opds/series/{series_slug}",
+        page=page,
+        page_size=page_size,
+        total=total,
+        subset=subset,
+    )
+
+
+@app.get("/opds/publishers/{publisher_slug}")
+def opds_publisher_feed(
+    publisher_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    total, subset = store.page_by_publisher_slug(publisher_slug=publisher_slug, page=page, page_size=page_size)
+    return _build_feed_response(
+        request=request,
+        title=f"OAPEN Publisher: {publisher_slug}",
+        path=f"/opds/publishers/{publisher_slug}",
         page=page,
         page_size=page_size,
         total=total,

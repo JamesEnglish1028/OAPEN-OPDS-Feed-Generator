@@ -20,6 +20,8 @@ Small service that ingests OAPEN metadata (JSON or OAI-PMH Dublin Core) and expo
 - OAPEN metadata extensions mapped into OPDS output (`belongsTo`, `images`, `altIdentifier`, `accessibility`)
 - Root OPDS navigation links (`rel: subsection`) for all collection feeds
 - OPDS language facet compact collection (`facets`) with `numberOfItems`
+- `metadata.publisher.links` points to publisher-specific OPDS subfeeds
+- `metadata.belongsTo.collection` includes `name` + `links` (from funder mapping)
 - Persistent storage with `DATABASE_URL` (SQLite default, PostgreSQL supported)
 - Harvest checkpoint visibility (`GET /harvest/checkpoints`)
 - Alembic migration/versioning for schema changes
@@ -115,6 +117,12 @@ Series feed:
 
 ```bash
 curl "http://127.0.0.1:8000/opds/series/demo-series?page=1&page_size=25"
+```
+
+Publisher feed:
+
+```bash
+curl "http://127.0.0.1:8000/opds/publishers/oapen-press?page=1&page_size=25"
 ```
 
 Validate current OPDS page against Palace profile:

@@ -110,6 +110,7 @@ def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
         series_name=series_name,
         series_slug=_slugify(series_name),
         series_position=series_position,
+        publisher_slug=_slugify(_first_str(raw.get("publisher"), metadata.get("publisher"), metadata.get("imprint"))),
         raw=raw,
     )
 
@@ -151,5 +152,6 @@ def normalize_oai_record(fields: dict[str, list[str]]) -> NormalizedPublication 
         series_name=None,
         series_slug=None,
         series_position=None,
+        publisher_slug=_slugify(_first_str(*fields.get("publisher", []))),
         raw={k: v for k, v in fields.items()},
     )

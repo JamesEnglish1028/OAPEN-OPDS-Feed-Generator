@@ -52,6 +52,7 @@ class PublicationRow(Base):
     series_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
     series_slug: Mapped[str | None] = mapped_column(String(512), nullable=True)
     series_position: Mapped[int | None] = mapped_column(nullable=True)
+    publisher_slug: Mapped[str | None] = mapped_column(String(512), nullable=True)
     raw_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -98,6 +99,7 @@ class PublicationStore:
             "series_name": pub.series_name,
             "series_slug": pub.series_slug,
             "series_position": pub.series_position,
+            "publisher_slug": pub.publisher_slug,
             "raw_json": json.dumps(pub.raw, ensure_ascii=True),
             "updated_at": datetime.now(UTC),
         }
@@ -179,6 +181,22 @@ class PublicationStore:
                 select(PublicationRow)
                 .where(PublicationRow.series_slug == series_slug)
                 .order_by(PublicationRow.series_position.asc().nullslast(), PublicationRow.publication_id.asc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            rows = session.scalars(statement).all()
+            return total, [self._to_publication(row) for row in rows]
+
+    def page_by_publisher_slug(self, publisher_slug: str, page: int, page_size: int) -> tuple[int, list[NormalizedPublication]]:
+        offset = (page - 1) * page_size
+        with self._session() as session:
+            total = session.scalar(
+                select(sqla_func.count()).select_from(PublicationRow).where(PublicationRow.publisher_slug == publisher_slug)
+            ) or 0
+            statement = (
+                select(PublicationRow)
+                .where(PublicationRow.publisher_slug == publisher_slug)
+                .order_by(PublicationRow.publication_id.asc())
                 .offset(offset)
                 .limit(page_size)
             )
@@ -301,5 +319,6 @@ class PublicationStore:
             series_name=row.series_name,
             series_slug=row.series_slug,
             series_position=row.series_position,
+            publisher_slug=row.publisher_slug,
             raw=json.loads(row.raw_json or "{}"),
         )
