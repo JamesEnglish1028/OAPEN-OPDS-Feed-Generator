@@ -187,10 +187,10 @@ def _to_opds_publication(pub) -> dict:
         if isinstance(isbn, str) and isbn.strip():
             alt_identifiers.append(f"urn:isbn:{isbn.strip()}")
 
-    belongs_to = []
+    series_entries = []
     for item in _as_list(metadata_src.get("belongsTo")):
         if isinstance(item, str) and item.strip():
-            belongs_to.append({"name": item.strip(), "series": item.strip()})
+            series_entries.append({"name": item.strip()})
         elif isinstance(item, dict):
             # Preserve OAPEN belongsTo structure, but drop null/empty properties.
             collection = {}
@@ -212,18 +212,24 @@ def _to_opds_publication(pub) -> dict:
             if isinstance(series_value, str) and series_value:
                 collection.setdefault("name", series_value)
             elif isinstance(collection.get("name"), str) and collection["name"]:
-                collection.setdefault("series", collection["name"])
+                series_value = collection["name"]
+            else:
+                series_value = None
 
             series_number = collection.get("seriesNumber")
             if isinstance(series_number, int):
                 series_number = str(series_number)
+            entry: dict[str, str | int] = {}
+            if isinstance(series_value, str) and series_value:
+                entry["name"] = series_value
             if isinstance(series_number, str) and series_number:
-                collection.setdefault("position", series_number)
-            collection.pop("seriesNumber", None)
-
-            # Omit meaningless belongsTo objects with no usable series/name.
-            if collection.get("series") or collection.get("name"):
-                belongs_to.append(collection)
+                if series_number.isdigit():
+                    entry["position"] = int(series_number)
+                else:
+                    entry["position"] = series_number
+            # Omit meaningless entries with no usable series name.
+            if "name" in entry:
+                series_entries.append(entry)
 
     accessibility = []
     for item in _as_list(metadata_src.get("accessibility")):
@@ -244,8 +250,8 @@ def _to_opds_publication(pub) -> dict:
         "subject": subject,
         "publisher": {"name": pub.publisher} if pub.publisher else None,
     }
-    if belongs_to:
-        metadata["belongsTo"] = belongs_to
+    if series_entries:
+        metadata["belongsTo"] = {"series": series_entries[0]}
     if alt_identifiers:
         metadata["altIdentifier"] = alt_identifiers
     if accessibility:
