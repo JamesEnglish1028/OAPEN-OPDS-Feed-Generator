@@ -188,7 +188,11 @@ def _to_opds_publication(pub) -> dict:
             alt_identifiers.append(f"urn:isbn:{isbn.strip()}")
 
     series_entries = []
-    for item in _as_list(metadata_src.get("belongsTo")):
+    belongs_to_source = metadata_src.get("belongsTo")
+    if belongs_to_source is None:
+        belongs_to_source = raw.get("belongsTo")
+
+    for item in _as_list(belongs_to_source):
         if isinstance(item, str) and item.strip():
             series_entries.append({"name": item.strip()})
         elif isinstance(item, dict):
@@ -239,6 +243,11 @@ def _to_opds_publication(pub) -> dict:
     author = [{"name": name} for name in pub.authors] if pub.authors else []
     subject = [{"name": value} for value in pub.subjects] if pub.subjects else []
 
+    description = metadata_src.get("description")
+    if not isinstance(description, str) or not description.strip():
+        raw_description = raw.get("description")
+        description = raw_description if isinstance(raw_description, str) and raw_description.strip() else None
+
     metadata = {
         "@type": "http://schema.org/Book",
         "title": pub.title,
@@ -250,6 +259,8 @@ def _to_opds_publication(pub) -> dict:
         "subject": subject,
         "publisher": {"name": pub.publisher} if pub.publisher else None,
     }
+    if description:
+        metadata["description"] = description
     if series_entries:
         metadata["belongsTo"] = {"series": series_entries[0]}
     if alt_identifiers:

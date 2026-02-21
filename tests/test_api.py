@@ -59,6 +59,7 @@ def test_get_single_publication() -> None:
     enriched = client.get("/publications/book-3")
     assert enriched.status_code == 200
     enriched_payload = enriched.json()
+    assert enriched_payload["metadata"]["description"] == "A demonstration title with belongsTo and accessibility metadata."
     assert enriched_payload["metadata"]["belongsTo"]["series"]["name"] == "Demo Series"
     assert enriched_payload["metadata"]["belongsTo"]["series"]["position"] == 12
     assert all(value is not None for value in enriched_payload["metadata"]["belongsTo"]["series"].values())
