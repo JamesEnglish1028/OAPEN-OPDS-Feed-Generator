@@ -217,9 +217,9 @@ def _to_opds_publication(pub) -> dict:
             series_number = collection.get("seriesNumber")
             if isinstance(series_number, int):
                 series_number = str(series_number)
-                collection["seriesNumber"] = series_number
             if isinstance(series_number, str) and series_number:
                 collection.setdefault("position", series_number)
+            collection.pop("seriesNumber", None)
 
             # Omit meaningless belongsTo objects with no usable series/name.
             if collection.get("series") or collection.get("name"):

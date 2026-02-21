@@ -61,8 +61,8 @@ def test_get_single_publication() -> None:
     enriched_payload = enriched.json()
     assert enriched_payload["metadata"]["belongsTo"][0]["name"] == "Demo Series"
     assert enriched_payload["metadata"]["belongsTo"][0]["series"] == "Demo Series"
-    assert enriched_payload["metadata"]["belongsTo"][0]["seriesNumber"] == "12"
     assert enriched_payload["metadata"]["belongsTo"][0]["position"] == "12"
+    assert "seriesNumber" not in enriched_payload["metadata"]["belongsTo"][0]
     assert all(value is not None for value in enriched_payload["metadata"]["belongsTo"][0].values())
     assert enriched_payload["metadata"]["altIdentifier"][0] == "https://doi.org/10.1234/example-doi"
     assert "urn:isbn:9780000000001" in enriched_payload["metadata"]["altIdentifier"]
