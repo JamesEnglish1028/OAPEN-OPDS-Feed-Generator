@@ -46,10 +46,13 @@ def _slugify(value: str | None) -> str | None:
     return slug or None
 
 
-def _extract_publication_year(value: str | None) -> int | None:
+def _extract_publication_year(value: Any) -> int | None:
     if not value:
         return None
-    match = re.search(r"\b(19\d{2}|20\d{2}|21\d{2})\b", value)
+    if isinstance(value, int):
+        return value if 1900 <= value <= 2199 else None
+    text = str(value)
+    match = re.search(r"\b(19\d{2}|20\d{2}|21\d{2})\b", text)
     if not match:
         return None
     year = int(match.group(1))
@@ -89,8 +92,21 @@ def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
     language = _first_str(raw.get("language"), raw.get("lang"), metadata.get("language"))
     if language is None:
         language = _first_str(*[str(v) for v in _as_list(metadata.get("language"))])
-    published = _first_str(raw.get("published"), raw.get("publication_date"), raw.get("date"), metadata.get("published"), metadata.get("modified"))
-    publication_year = _extract_publication_year(published)
+    published_candidate = _first_str(
+        raw.get("published"),
+        raw.get("publication_date"),
+        raw.get("date"),
+        metadata.get("published"),
+        metadata.get("modified"),
+    )
+    if published_candidate is None and isinstance(metadata.get("published"), int):
+        published_candidate = str(metadata.get("published"))
+    published = published_candidate
+    publication_year = (
+        _extract_publication_year(metadata.get("published"))
+        or _extract_publication_year(published)
+        or _extract_publication_year(metadata.get("modified"))
+    )
     publisher_value = _first_str(raw.get("publisher"), metadata.get("publisher"), metadata.get("imprint"))
     funders = [str(v).strip() for v in _as_list(metadata.get("funder")) if isinstance(v, str) and str(v).strip()]
     collection = funders[0] if funders else None
