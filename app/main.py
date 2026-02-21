@@ -150,7 +150,7 @@ def _ingest_oai(request: OaiIngestRequest) -> IngestResult:
     return result
 
 
-def _to_opds_publication(pub) -> dict:
+def _to_opds_publication(pub, base_url: str | None = None) -> dict:
     def to_rfc3339(value: str | None) -> str | None:
         if not value:
             return None
@@ -191,7 +191,7 @@ def _to_opds_publication(pub) -> dict:
     links = pub.links or [
         {
             "rel": "self",
-            "href": f"/publications/{pub.publication_id}",
+            "href": f"{base_url}/publications/{pub.publication_id}" if base_url else f"/publications/{pub.publication_id}",
             "type": "application/opds+json",
         }
     ]
@@ -213,7 +213,10 @@ def _to_opds_publication(pub) -> dict:
         if pub.series_position is not None:
             series_entry["position"] = pub.series_position
         if pub.series_slug:
-            series_entry["links"] = [{"href": f"/opds/series/{pub.series_slug}", "type": "application/opds+json"}]
+            href = f"/opds/series/{pub.series_slug}"
+            if base_url:
+                href = f"{base_url}{href}"
+            series_entry["links"] = [{"href": href, "type": "application/opds+json"}]
 
     collection_value = None
     if pub.collection:
@@ -286,7 +289,8 @@ def _build_feed_response(
     subset,
 ) -> dict:
     end = (page - 1) * page_size + len(subset)
-    publications = [_to_opds_publication(pub) for pub in subset]
+    base_url = str(request.base_url).rstrip("/")
+    publications = [_to_opds_publication(pub, base_url=base_url) for pub in subset]
 
     links = [{"rel": "self", "href": _build_url(request, path, {"page": page, "page_size": page_size}), "type": "application/opds+json"}]
     if end < total:
@@ -412,7 +416,7 @@ def opds_feed(
     languages = store.list_language_counts()
     response["navigation"] = [
         {
-            "href": f"/opds/collections/{item['slug']}",
+            "href": _build_url(request, f"/opds/collections/{item['slug']}", {}),
             "title": f"Collection: {item['name']}",
             "type": "application/opds+json",
             "rel": "subsection",
@@ -424,7 +428,7 @@ def opds_feed(
             "metadata": {"title": "Language"},
             "links": [
                 {
-                    "href": f"/opds/languages/{item['code']}",
+                    "href": _build_url(request, f"/opds/languages/{item['code']}", {}),
                     "type": "application/opds+json",
                     "title": _language_label(str(item["code"])),
                     "properties": {"numberOfItems": int(item["count"])},
@@ -494,11 +498,11 @@ def opds_series_feed(
 
 
 @app.get("/publications/{publication_id}")
-def publication(publication_id: str) -> dict:
+def publication(publication_id: str, request: Request) -> dict:
     pub = store.get(publication_id)
     if pub is None:
         raise HTTPException(status_code=404, detail="Publication not found")
-    return _to_opds_publication(pub)
+    return _to_opds_publication(pub, base_url=str(request.base_url).rstrip("/"))
 
 
 @app.get("/harvest/checkpoints")
