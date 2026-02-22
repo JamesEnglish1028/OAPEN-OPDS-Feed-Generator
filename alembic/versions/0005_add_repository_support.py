@@ -23,7 +23,7 @@ def upgrade() -> None:
         sa.Column("source_type", sa.String(length=64), nullable=False),
         sa.Column("name", sa.String(length=256), nullable=False),
         sa.Column("config_json", sa.Text(), nullable=False, server_default="{}"),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.PrimaryKeyConstraint("repository_id"),
