@@ -163,7 +163,7 @@ def test_collection_and_language_subfeeds() -> None:
     language_feed = client.get("/opds/languages/en?page=1&page_size=10")
     assert language_feed.status_code == 200
     language_json = language_feed.json()
-    assert language_json["metadata"]["numberOfItems"] == 2
+    assert language_json["metadata"]["numberOfItems"] == 3
 
     year_feed = client.get("/opds/years/2026?page=1&page_size=10")
     assert year_feed.status_code == 200
@@ -242,10 +242,10 @@ def test_language_normalization_and_omission(tmp_path) -> None:
     assert ingest.json()["accepted"] == 4
 
     two_letter = client.get("/publications/lang-two").json()
-    assert two_letter["metadata"]["language"] == "EN"
+    assert two_letter["metadata"]["language"] == "English"
 
     three_letter = client.get("/publications/lang-three").json()
-    assert three_letter["metadata"]["language"] == "ESP"
+    assert three_letter["metadata"]["language"] == "Spanish"
 
     language_word = client.get("/publications/lang-word").json()
     assert language_word["metadata"]["language"] == "Spanish"

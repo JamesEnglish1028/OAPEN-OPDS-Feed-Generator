@@ -1,0 +1,26 @@
+{
+  "eng": {
+    "nativeName": "English"
+  },
+  "spa": {
+    "nativeName": "Spanish"
+  },
+  "fra": {
+    "nativeName": "French"
+  },
+  "deu": {
+    "nativeName": "German"
+  },
+  "ita": {
+    "nativeName": "Italian"
+  },
+  "nld": {
+    "nativeName": "Dutch"
+  },
+  "por": {
+    "nativeName": "Portuguese"
+  },
+  "swe": {
+    "nativeName": "Swedish"
+  }
+}

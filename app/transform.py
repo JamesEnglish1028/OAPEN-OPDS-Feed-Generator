@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from app.models import NormalizedPublication
@@ -22,6 +25,85 @@ def _first_str(*values: Any) -> str | None:
     return None
 
 
+_ALPHA2_TO_ALPHA3: dict[str, str] = {
+    "en": "eng",
+    "es": "spa",
+    "fr": "fra",
+    "de": "deu",
+    "it": "ita",
+    "nl": "nld",
+    "pt": "por",
+    "sv": "swe",
+}
+
+_ALPHA3_ALIASES: dict[str, str] = {
+    "eng": "eng",
+    "esp": "spa",
+    "spa": "spa",
+    "fre": "fra",
+    "fra": "fra",
+    "ger": "deu",
+    "deu": "deu",
+    "ita": "ita",
+    "dut": "nld",
+    "nld": "nld",
+    "por": "por",
+    "swe": "swe",
+}
+
+_DEFAULT_ALPHA3_TO_NAME: dict[str, str] = {
+    "eng": "English",
+    "spa": "Spanish",
+    "fra": "French",
+    "deu": "German",
+    "ita": "Italian",
+    "nld": "Dutch",
+    "por": "Portuguese",
+    "swe": "Swedish",
+}
+
+
+@lru_cache(maxsize=1)
+def _alpha3_to_native_name_mapping() -> dict[str, str]:
+    mapping = dict(_DEFAULT_ALPHA3_TO_NAME)
+    resource_path = Path(__file__).resolve().parent / "resources" / "alpha3toNativeNameMapping.json"
+    if not resource_path.exists():
+        return mapping
+    try:
+        payload = json.loads(resource_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return mapping
+    if not isinstance(payload, dict):
+        return mapping
+    for alpha3, value in payload.items():
+        if not isinstance(alpha3, str) or len(alpha3) != 3:
+            continue
+        native_name: str | None = None
+        if isinstance(value, dict):
+            native_name = _first_str(
+                value.get("nativeName"),
+                value.get("name"),
+                value.get("englishName"),
+                value.get("eng"),
+            )
+        elif isinstance(value, str):
+            native_name = value.strip() or None
+        if native_name:
+            mapping[alpha3.lower()] = native_name
+    return mapping
+
+
+@lru_cache(maxsize=1)
+def _language_name_lookup() -> dict[str, str]:
+    by_name: dict[str, str] = {}
+    for canonical in _alpha3_to_native_name_mapping().values():
+        by_name[canonical.casefold()] = canonical
+    # Common normalization aliases.
+    by_name["espanol"] = _alpha3_to_native_name_mapping().get("spa", "Spanish")
+    by_name["español"] = _alpha3_to_native_name_mapping().get("spa", "Spanish")
+    return by_name
+
+
 def normalize_language_value(value: Any) -> str | None:
     if value is None:
         return None
@@ -39,9 +121,19 @@ def normalize_language_value(value: Any) -> str | None:
     cleaned = value.strip()
     if not cleaned:
         return None
-    if cleaned.isalpha() and len(cleaned) in (2, 3):
+    folded = cleaned.casefold()
+    if cleaned.isalpha() and len(cleaned) == 2:
+        alpha3 = _ALPHA2_TO_ALPHA3.get(folded)
+        if alpha3:
+            return _alpha3_to_native_name_mapping().get(alpha3, alpha3.upper())
         return cleaned.upper()
+    if cleaned.isalpha() and len(cleaned) == 3:
+        alpha3 = _ALPHA3_ALIASES.get(folded, folded)
+        return _alpha3_to_native_name_mapping().get(alpha3, cleaned.upper())
     if re.fullmatch(r"[A-Za-z][A-Za-z \-]*", cleaned):
+        normalized = _language_name_lookup().get(folded)
+        if normalized:
+            return normalized
         return " ".join(part.capitalize() for part in cleaned.split())
     return None
 
