@@ -48,6 +48,48 @@ def _extract_year(value: Any) -> int | None:
     return year if 1900 <= year <= 2199 else None
 
 
+def _build_springer_acquisition_links(record: dict[str, Any]) -> list[dict[str, str]]:
+    doi = _first_str(record.get("doi"))
+    candidate_bases: list[str] = []
+    if doi:
+        candidate_bases.append(f"https://link.springer.com/content/pdf/{doi}")
+
+    for url_item in _as_list(record.get("url")):
+        if not isinstance(url_item, dict):
+            continue
+        href = _first_str(url_item.get("value"), url_item.get("url"), url_item.get("href"))
+        if href is None:
+            continue
+        normalized_href = href.strip()
+        if normalized_href.endswith(".pdf"):
+            normalized_href = normalized_href[: -len(".pdf")]
+        elif normalized_href.endswith(".epub"):
+            normalized_href = normalized_href[: -len(".epub")]
+        if "link.springer.com/content/" in normalized_href:
+            candidate_bases.append(normalized_href)
+
+    seen: set[str] = set()
+    links: list[dict[str, str]] = []
+    for base in candidate_bases:
+        pdf_href = f"{base}.pdf"
+        epub_href = f"{base}.epub"
+        for href, media_type in (
+            (pdf_href, "application/pdf"),
+            (epub_href, "application/epub+zip"),
+        ):
+            if href in seen:
+                continue
+            seen.add(href)
+            links.append(
+                {
+                    "href": href,
+                    "rel": "http://opds-spec.org/acquisition/open-access",
+                    "type": media_type,
+                }
+            )
+    return links
+
+
 def _normalize_springer_record(record: dict[str, Any], repository_id: str) -> NormalizedPublication | None:
     title = _first_str(record.get("title"))
     if title is None:
@@ -70,7 +112,7 @@ def _normalize_springer_record(record: dict[str, Any], repository_id: str) -> No
     published = _first_str(record.get("publicationDate"), record.get("coverDate"), record.get("onlineDate"), record.get("date"))
     publisher = _first_str(record.get("publisher"), record.get("publicationName"))
 
-    links: list[dict[str, str]] = []
+    links = _build_springer_acquisition_links(record)
     for url_item in _as_list(record.get("url")):
         if not isinstance(url_item, dict):
             continue
@@ -81,7 +123,7 @@ def _normalize_springer_record(record: dict[str, Any], repository_id: str) -> No
         media_type = media_type or ("application/pdf" if href.lower().endswith(".pdf") else "application/octet-stream")
         links.append({
             "href": href,
-            "rel": "http://opds-spec.org/acquisition/open-access",
+            "rel": "alternate",
             "type": media_type,
         })
 
