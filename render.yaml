@@ -8,6 +8,7 @@ services:
   - type: keyvalue
     name: oapen-opds-cache
     plan: free
+    ipAllowList: []
 
   - type: web
     name: oapen-opds-feed-generator
