@@ -14,6 +14,8 @@ Small service that ingests OAPEN metadata (JSON or OAI-PMH Dublin Core) and expo
 - Ingest from JSON URL (`POST /ingest/json-url`)
 - Async ingest jobs for JSON URLs (`POST /ingest/json-url/jobs`, `GET /ingest/jobs/{job_id}`)
 - Ingest from OAI-PMH endpoint with checkpointed incremental windows (`POST /ingest/oai-pmh`)
+- Multi-repository support with repository-scoped ingest/feed endpoints (`/repositories/{repository_id}/...`)
+- Springer Nature Open Access adapter with retries/backoff (`POST /repositories/{repository_id}/ingest/springer`)
 - Normalize/validate records into OPDS-like publication entries
 - Paginated OPDS 2 feed (`GET /opds?page=1&page_size=50`)
 - Single publication endpoint (`GET /publications/{id}`)
@@ -66,6 +68,7 @@ export REDIS_URL="redis://localhost:6379/0"
 export OPDS_CACHE_TTL_SECONDS="900"
 export OPDS_CACHE_PREFIX="opds-cache"
 export OPDS_CACHE_INVALIDATE_EVERY_N_UPSERTS="0"
+export SPRINGER_OPENACCESS_BASE_URL="https://api.springernature.com/openaccess/json"
 ```
 
 `OPDS_CACHE_INVALIDATE_EVERY_N_UPSERTS` controls progressive cache refresh during long ingests.  
@@ -130,6 +133,33 @@ Retrieve OPDS page 1:
 
 ```bash
 curl "http://127.0.0.1:8000/opds?page=1&page_size=25"
+```
+
+Create a Springer Nature repository profile:
+
+```bash
+curl -X PUT http://127.0.0.1:8000/repositories/springer-oa \
+  -H "content-type: application/json" \
+  -d '{
+    "source_type":"springer-openaccess",
+    "name":"Springer Nature OA Books",
+    "config":{"api_key":"<SPRINGER_API_KEY>","query":"type:Book","page_size":50},
+    "is_active":true
+  }'
+```
+
+Run Springer ingest for that repository:
+
+```bash
+curl -X POST http://127.0.0.1:8000/repositories/springer-oa/ingest/springer \
+  -H "content-type: application/json" \
+  -d '{"max_records":500}'
+```
+
+Retrieve Springer repository OPDS page 1:
+
+```bash
+curl "http://127.0.0.1:8000/repositories/springer-oa/opds?page=1&page_size=25"
 ```
 
 Collection feed:

@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.main import app, store
+from app.store import IngestResult
 from app.store import PublicationStore
 
 
@@ -276,9 +277,10 @@ class _FakeOpdsCache:
         self._payloads: dict[str, dict] = {}
         self.invalidations = 0
 
-    def key_for_request(self, request) -> str:
+    def key_for_request(self, request, namespace=None) -> str:
         query = f"?{request.url.query}" if request.url.query else ""
-        return f"{request.url.path}{query}"
+        prefix = f"{namespace}:" if namespace else ""
+        return f"{prefix}{request.url.path}{query}"
 
     def get_json(self, key: str):
         return self._payloads.get(key)
@@ -431,3 +433,62 @@ def test_opds_metadata_omits_null_temporal_fields(tmp_path) -> None:
     metadata = publication.json()["metadata"]
     assert "modified" not in metadata
     assert "published" not in metadata
+
+
+def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:
+    _reset_store()
+    create_repo = client.put(
+        "/repositories/springer-oa",
+        json={
+            "source_type": "springer-openaccess",
+            "name": "Springer OA",
+            "config": {"api_key": "test-key", "query": "type:Book"},
+            "is_active": True,
+        },
+    )
+    assert create_repo.status_code == 200
+
+    sample_path = Path(__file__).parent / "data" / "sample_oapen.json"
+    ingest_repo = client.post("/repositories/springer-oa/ingest/json", json={"path": str(sample_path)})
+    assert ingest_repo.status_code == 200
+    assert ingest_repo.json()["accepted"] == 3
+
+    default_feed = client.get("/opds?page=1&page_size=10")
+    assert default_feed.status_code == 200
+    assert default_feed.json()["metadata"]["numberOfItems"] == 0
+
+    repo_feed = client.get("/repositories/springer-oa/opds?page=1&page_size=10")
+    assert repo_feed.status_code == 200
+    assert repo_feed.json()["metadata"]["numberOfItems"] == 3
+
+
+def test_springer_ingest_endpoint_uses_adapter(monkeypatch) -> None:
+    _reset_store()
+    create_repo = client.put(
+        "/repositories/springer-oa",
+        json={
+            "source_type": "springer-openaccess",
+            "name": "Springer OA",
+            "config": {"api_key": "test-key", "query": "type:Book"},
+            "is_active": True,
+        },
+    )
+    assert create_repo.status_code == 200
+
+    def fake_ingest_repository(store, repository, max_records):
+        assert repository.repository_id == "springer-oa"
+        return IngestResult(accepted=2, rejected=1, errors=[])
+
+    monkeypatch.setattr(main_module.springer_source, "ingest_repository", fake_ingest_repository)
+    monkeypatch.setattr(
+        main_module.store,
+        "get_checkpoint",
+        lambda checkpoint_key, repository_id=None: None,
+    )
+
+    response = client.post("/repositories/springer-oa/ingest/springer", json={"max_records": 25})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["repository_id"] == "springer-oa"
+    assert payload["accepted"] == 2
+    assert payload["rejected"] == 1

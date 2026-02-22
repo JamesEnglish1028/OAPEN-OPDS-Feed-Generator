@@ -11,6 +11,8 @@ from app.transform import normalize_oai_record
 @dataclass
 class HarvestRunSummary:
     checkpoint_key: str
+    repository_id: str
+    source_type: str
     base_url: str
     accepted: int
     rejected: int
@@ -68,6 +70,8 @@ def run_incremental_for_checkpoint(
     )
     return HarvestRunSummary(
         checkpoint_key=checkpoint.checkpoint_key,
+        repository_id=checkpoint.repository_id,
+        source_type=checkpoint.source_type,
         base_url=checkpoint.base_url,
         accepted=accepted,
         rejected=rejected,
@@ -81,7 +85,7 @@ def run_incremental_for_all_checkpoints(
     store: PublicationStore,
     max_records: int | None = None,
 ) -> dict:
-    checkpoints = store.list_checkpoints()
+    checkpoints = store.list_checkpoints(source_type="oai-pmh")
     results: list[HarvestRunSummary] = []
 
     for checkpoint in checkpoints:
@@ -92,6 +96,8 @@ def run_incremental_for_all_checkpoints(
             results.append(
                 HarvestRunSummary(
                     checkpoint_key=checkpoint.checkpoint_key,
+                    repository_id=checkpoint.repository_id,
+                    source_type=checkpoint.source_type,
                     base_url=checkpoint.base_url,
                     accepted=0,
                     rejected=0,

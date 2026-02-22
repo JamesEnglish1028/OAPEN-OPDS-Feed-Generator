@@ -43,11 +43,13 @@ class OpdsCache:
         except Exception:
             logger.exception("Failed to close Redis client cleanly.")
 
-    def key_for_request(self, request: Request) -> str:
+    def key_for_request(self, request: Request, namespace: str | None = None) -> str:
         path = request.url.path
         query_pairs = parse_qsl(request.url.query, keep_blank_values=True)
         normalized_query = urlencode(sorted(query_pairs))
         suffix = f"{path}?{normalized_query}" if normalized_query else path
+        if namespace:
+            return f"{self._prefix}:feed:{namespace}:{suffix}"
         return f"{self._prefix}:feed:{suffix}"
 
     def get_json(self, key: str) -> dict | None:
@@ -68,10 +70,13 @@ class OpdsCache:
         except Exception:
             logger.exception("Redis set failed for key %s", key)
 
-    def invalidate_feed_keys(self) -> int:
+    def invalidate_feed_keys(self, namespace: str | None = None) -> int:
         if self._client is None:
             return 0
-        pattern = f"{self._prefix}:feed:*"
+        if namespace:
+            pattern = f"{self._prefix}:feed:{namespace}:*"
+        else:
+            pattern = f"{self._prefix}:feed:*"
         removed = 0
         try:
             for key in self._client.scan_iter(match=pattern, count=500):

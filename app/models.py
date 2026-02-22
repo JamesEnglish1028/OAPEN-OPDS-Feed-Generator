@@ -8,6 +8,8 @@ from typing import Any
 class NormalizedPublication:
     publication_id: str
     title: str
+    repository_id: str = "default"
+    source_publication_id: str | None = None
     authors: list[str] = field(default_factory=list)
     language: str | None = None
     publisher: str | None = None
