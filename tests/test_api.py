@@ -469,6 +469,37 @@ def test_publication_metadata_type_maps_chapter_records(tmp_path) -> None:
     assert payload["metadata"]["belongsTo"]["series"]["identifier"] == "1345"
 
 
+def test_chapter_records_with_only_series_id_still_include_belongsto(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "chapter_series_only_case.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "publications": [
+                    {
+                        "id": "chapter-series-only",
+                        "title": "Chapter Series Only",
+                        "contentType": "Chapter",
+                        "publicationType": "Book",
+                        "publicationName": "",
+                        "seriesId": "1345",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+
+    publication = client.get("/publications/chapter-series-only")
+    assert publication.status_code == 200
+    payload = publication.json()
+    assert payload["metadata"]["@type"] == "http://schema.org/Chapter"
+    assert payload["metadata"]["belongsTo"]["series"]["identifier"] == "1345"
+
+
 def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:
     _reset_store()
     create_repo = client.put(

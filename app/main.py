@@ -368,13 +368,19 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
         springer_publication_name = raw.get("publicationName").strip()
     elif isinstance(metadata_src.get("publicationName"), str) and metadata_src.get("publicationName", "").strip():
         springer_publication_name = metadata_src.get("publicationName").strip()
+    springer_series_id_raw = raw.get("seriesId")
+    if springer_series_id_raw is None:
+        springer_series_id_raw = metadata_src.get("seriesId")
     springer_series_id = None
-    if isinstance(raw.get("seriesId"), str) and raw.get("seriesId", "").strip():
-        springer_series_id = raw.get("seriesId").strip()
-    elif isinstance(metadata_src.get("seriesId"), str) and metadata_src.get("seriesId", "").strip():
-        springer_series_id = metadata_src.get("seriesId").strip()
-    if series_entry is None and schema_type == "http://schema.org/Chapter" and springer_publication_name:
-        series_entry = {"name": springer_publication_name}
+    if isinstance(springer_series_id_raw, str) and springer_series_id_raw.strip():
+        springer_series_id = springer_series_id_raw.strip()
+    elif isinstance(springer_series_id_raw, int):
+        springer_series_id = str(springer_series_id_raw)
+    if series_entry is None and schema_type == "http://schema.org/Chapter":
+        if springer_publication_name:
+            series_entry = {"name": springer_publication_name}
+        elif springer_series_id:
+            series_entry = {"identifier": springer_series_id}
     if series_entry is not None and springer_series_id:
         series_entry["identifier"] = springer_series_id
 
