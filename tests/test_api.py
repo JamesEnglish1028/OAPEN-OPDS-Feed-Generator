@@ -344,6 +344,21 @@ def test_ingest_invalidates_opds_cache(monkeypatch) -> None:
     assert len(fake_cache._payloads) == 0
 
 
+def test_ingest_progressively_invalidates_cache_when_configured(monkeypatch) -> None:
+    _reset_store()
+    sample_path = Path(__file__).parent / "data" / "sample_oapen.json"
+
+    fake_cache = _FakeOpdsCache()
+    monkeypatch.setattr(main_module, "opds_cache", fake_cache)
+    monkeypatch.setenv("OPDS_CACHE_INVALIDATE_EVERY_N_UPSERTS", "2")
+
+    response = client.post("/ingest/json", json={"path": str(sample_path)})
+    assert response.status_code == 200
+    assert response.json()["accepted"] == 3
+    # One mid-ingest invalidation at 2, one final invalidation at endpoint completion.
+    assert fake_cache.invalidations == 2
+
+
 def test_language_facet_titles_use_uppercase_native_names() -> None:
     _reset_store()
     sample_path = Path(__file__).parent / "data" / "sample_oapen.json"

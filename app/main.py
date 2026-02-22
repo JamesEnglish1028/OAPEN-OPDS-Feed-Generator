@@ -91,8 +91,30 @@ def _utcnow_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _cache_invalidate_every_n_upserts() -> int:
+    raw = os.getenv("OPDS_CACHE_INVALIDATE_EVERY_N_UPSERTS", "0").strip()
+    if not raw:
+        return 0
+    try:
+        value = int(raw)
+    except ValueError:
+        return 0
+    return max(value, 0)
+
+
+def _maybe_invalidate_opds_cache_during_ingest(accepted_count: int, last_invalidation_count: int) -> int:
+    invalidate_every = _cache_invalidate_every_n_upserts()
+    if invalidate_every <= 0:
+        return last_invalidation_count
+    if accepted_count - last_invalidation_count < invalidate_every:
+        return last_invalidation_count
+    _invalidate_opds_cache()
+    return accepted_count
+
+
 def _ingest_json(path: str) -> IngestResult:
     result = IngestResult(accepted=0, rejected=0, errors=[])
+    last_invalidation_count = 0
     for raw in iter_json_records(path):
         normalized = normalize_json_record(raw)
         if normalized is None:
@@ -100,11 +122,16 @@ def _ingest_json(path: str) -> IngestResult:
             continue
         store.upsert(normalized)
         result.accepted += 1
+        last_invalidation_count = _maybe_invalidate_opds_cache_during_ingest(
+            accepted_count=result.accepted,
+            last_invalidation_count=last_invalidation_count,
+        )
     return result
 
 
 def _ingest_json_url(url: str) -> IngestResult:
     result = IngestResult(accepted=0, rejected=0, errors=[])
+    last_invalidation_count = 0
     for raw in iter_json_records_from_url(url):
         normalized = normalize_json_record(raw)
         if normalized is None:
@@ -112,6 +139,10 @@ def _ingest_json_url(url: str) -> IngestResult:
             continue
         store.upsert(normalized)
         result.accepted += 1
+        last_invalidation_count = _maybe_invalidate_opds_cache_during_ingest(
+            accepted_count=result.accepted,
+            last_invalidation_count=last_invalidation_count,
+        )
     return result
 
 
@@ -142,6 +173,7 @@ def _run_json_url_ingest_job(job_id: str, url: str) -> None:
 
 def _ingest_oai(request: OaiIngestRequest) -> IngestResult:
     result = IngestResult(accepted=0, rejected=0, errors=[])
+    last_invalidation_count = 0
     checkpoint_key = request.checkpoint_key or _checkpoint_key(request.base_url, request.metadata_prefix, request.set_name)
     checkpoint = store.get_checkpoint(checkpoint_key) if request.incremental else None
     effective_from = request.from_date or (checkpoint.last_until_date if checkpoint else None)
@@ -164,6 +196,10 @@ def _ingest_oai(request: OaiIngestRequest) -> IngestResult:
         store.upsert(normalized)
         harvested_dates.append(normalized.published)
         result.accepted += 1
+        last_invalidation_count = _maybe_invalidate_opds_cache_during_ingest(
+            accepted_count=result.accepted,
+            last_invalidation_count=last_invalidation_count,
+        )
 
     if request.incremental:
         latest_harvested = _max_date_string(harvested_dates) or effective_until
@@ -404,6 +440,7 @@ def health() -> dict:
         "scheduler_enabled": scheduler_enabled,
         "scheduler_running": harvest_scheduler.is_running() if scheduler_enabled else False,
         "opds_cache_enabled": opds_cache.is_enabled(),
+        "opds_cache_invalidate_every_n_upserts": _cache_invalidate_every_n_upserts(),
     }
 
 

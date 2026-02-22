@@ -33,6 +33,8 @@ services:
         value: "0"
       - key: OPDS_CACHE_TTL_SECONDS
         value: "900"
+      - key: OPDS_CACHE_INVALIDATE_EVERY_N_UPSERTS
+        value: "0"
       - key: REDIS_URL
         fromService:
           type: keyvalue

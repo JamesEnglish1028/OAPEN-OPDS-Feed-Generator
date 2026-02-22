@@ -65,7 +65,11 @@ OPDS cache settings (optional):
 export REDIS_URL="redis://localhost:6379/0"
 export OPDS_CACHE_TTL_SECONDS="900"
 export OPDS_CACHE_PREFIX="opds-cache"
+export OPDS_CACHE_INVALIDATE_EVERY_N_UPSERTS="0"
 ```
+
+`OPDS_CACHE_INVALIDATE_EVERY_N_UPSERTS` controls progressive cache refresh during long ingests.  
+Use `0` to disable (default). Set a positive value (for example `500` or `1000`) to invalidate OPDS cache every N accepted upserts while ingest is running.
 
 Run migrations:
 
@@ -219,6 +223,7 @@ This repo includes:
    - `SCHEDULER_DAILY_UTC_HOUR=2`
    - `SCHEDULER_DAILY_UTC_MINUTE=0`
    - `OPDS_CACHE_TTL_SECONDS=900` (optional)
+   - `OPDS_CACHE_INVALIDATE_EVERY_N_UPSERTS=0` (optional; set >0 for progressive OPDS refresh during ingest)
 4. Ensure Auto-Deploy is enabled (it is enabled in `render.yaml`).
 5. Push to `main`; Render will deploy automatically.
 
