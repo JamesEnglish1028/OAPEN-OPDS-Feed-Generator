@@ -228,6 +228,7 @@ def test_language_normalization_and_omission(tmp_path) -> None:
             {
                 "publications": [
                     {"id": "lang-two", "title": "Language Two", "language": "en"},
+                    {"id": "lang-two-af", "title": "Language Two AF", "language": "af"},
                     {"id": "lang-three", "title": "Language Three", "language": "esp"},
                     {"id": "lang-three-uppercase-rus", "title": "Language Three Uppercase RUS", "language": "RUS"},
                     {"id": "lang-three-uppercase-dut", "title": "Language Three Uppercase DUT", "language": "DUT"},
@@ -241,10 +242,13 @@ def test_language_normalization_and_omission(tmp_path) -> None:
 
     ingest = client.post("/ingest/json", json={"path": str(payload_path)})
     assert ingest.status_code == 200
-    assert ingest.json()["accepted"] == 6
+    assert ingest.json()["accepted"] == 7
 
     two_letter = client.get("/publications/lang-two").json()
     assert two_letter["metadata"]["language"] == "ENG"
+
+    two_letter_af = client.get("/publications/lang-two-af").json()
+    assert two_letter_af["metadata"]["language"] == "AFR"
 
     three_letter = client.get("/publications/lang-three").json()
     assert three_letter["metadata"]["language"] == "SPA"
@@ -277,6 +281,50 @@ def test_language_facet_titles_use_uppercase_native_names() -> None:
     language_facet_links = root_feed.json()["facets"][0]["links"]
     titles = [item["title"] for item in language_facet_links]
     assert "ENGLISH" in titles
+
+
+def test_language_facet_titles_for_norwegian_variants(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "language_norwegian_cases.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "publications": [
+                    {"id": "lang-nor", "title": "Language NOR", "language": "NOR"},
+                    {"id": "lang-nob", "title": "Language NOB", "language": "NOB"},
+                    {"id": "lang-nno", "title": "Language NNO", "language": "NNO"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+
+    root_feed = client.get("/opds?page=1&page_size=10")
+    assert root_feed.status_code == 200
+    links = root_feed.json()["facets"][0]["links"]
+    title_by_href = {item["href"].split("/opds/languages/")[-1]: item["title"] for item in links}
+    assert title_by_href["NOR"] == "NORSK"
+    assert title_by_href["NOB"] == "NORSK BOKMAL"
+    assert title_by_href["NNO"] == "NORSK NYNORSK"
+
+
+def test_language_facet_titles_from_iso639_living_reference_names(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "language_reference_name_case.json"
+    payload_path.write_text(
+        json.dumps({"publications": [{"id": "lang-afr", "title": "Language AFR", "language": "af"}]}),
+        encoding="utf-8",
+    )
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+
+    root_feed = client.get("/opds?page=1&page_size=10")
+    assert root_feed.status_code == 200
+    links = root_feed.json()["facets"][0]["links"]
+    title_by_href = {item["href"].split("/opds/languages/")[-1]: item["title"] for item in links}
+    assert title_by_href["AFR"] == "AFRIKAANS"
 
 
 def test_opds_metadata_omits_null_temporal_fields(tmp_path) -> None:

@@ -32,6 +32,7 @@ _ALPHA2_TO_ALPHA3: dict[str, str] = {
     "de": "deu",
     "it": "ita",
     "nl": "nld",
+    "no": "nor",
     "pt": "por",
     "ru": "rus",
     "sv": "swe",
@@ -48,6 +49,9 @@ _ALPHA3_ALIASES: dict[str, str] = {
     "ita": "ita",
     "dut": "nld",
     "nld": "nld",
+    "nno": "nno",
+    "nob": "nob",
+    "nor": "nor",
     "por": "por",
     "rus": "rus",
     "swe": "swe",
@@ -60,16 +64,77 @@ _DEFAULT_ALPHA3_TO_NAME: dict[str, str] = {
     "deu": "German",
     "ita": "Italian",
     "nld": "Dutch",
+    "nno": "Norsk nynorsk",
+    "nob": "Norsk bokmal",
+    "nor": "Norsk",
     "por": "Portuguese",
     "rus": "Russian",
     "swe": "Swedish",
+}
+
+_LANGUAGE_NAME_ALIASES: dict[str, str] = {
+    "english": "eng",
+    "spanish": "spa",
+    "french": "fra",
+    "german": "deu",
+    "italian": "ita",
+    "dutch": "nld",
+    "portuguese": "por",
+    "russian": "rus",
+    "swedish": "swe",
+    "norwegian": "nor",
+    "norwegian nynorsk": "nno",
+    "norwegian bokmal": "nob",
+    "norwegian bokmål": "nob",
+    "bokmal": "nob",
+    "bokmål": "nob",
+    "nynorsk": "nno",
+    "norsk": "nor",
+    "norsk bokmal": "nob",
+    "norsk bokmål": "nob",
+    "norsk nynorsk": "nno",
 }
 
 
 @lru_cache(maxsize=1)
 def _alpha3_to_native_name_mapping() -> dict[str, str]:
     mapping = dict(_DEFAULT_ALPHA3_TO_NAME)
-    resource_path = Path(__file__).resolve().parent / "resources" / "alpha3toNativeNameMapping.json"
+    resources = [
+        Path(__file__).resolve().parent / "resources" / "alpha3toNativeNameMapping.json",
+        Path(__file__).resolve().parent / "resources" / "iso639-3_living.json",
+    ]
+    for resource_path in resources:
+        if not resource_path.exists():
+            continue
+        try:
+            payload = json.loads(resource_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        for alpha3, value in payload.items():
+            if not isinstance(alpha3, str) or len(alpha3) != 3:
+                continue
+            language_name: str | None = None
+            if isinstance(value, dict):
+                language_name = _first_str(
+                    value.get("nativeName"),
+                    value.get("referenceName"),
+                    value.get("name"),
+                    value.get("englishName"),
+                    value.get("eng"),
+                )
+            elif isinstance(value, str):
+                language_name = value.strip() or None
+            if language_name:
+                mapping[alpha3.lower()] = language_name
+    return mapping
+
+
+@lru_cache(maxsize=1)
+def _alpha2_to_alpha3_mapping() -> dict[str, str]:
+    mapping = dict(_ALPHA2_TO_ALPHA3)
+    resource_path = Path(__file__).resolve().parent / "resources" / "iso639-3_living.json"
     if not resource_path.exists():
         return mapping
     try:
@@ -79,20 +144,35 @@ def _alpha3_to_native_name_mapping() -> dict[str, str]:
     if not isinstance(payload, dict):
         return mapping
     for alpha3, value in payload.items():
-        if not isinstance(alpha3, str) or len(alpha3) != 3:
+        if not isinstance(alpha3, str) or len(alpha3) != 3 or not isinstance(value, dict):
             continue
-        native_name: str | None = None
-        if isinstance(value, dict):
-            native_name = _first_str(
-                value.get("nativeName"),
-                value.get("name"),
-                value.get("englishName"),
-                value.get("eng"),
-            )
-        elif isinstance(value, str):
-            native_name = value.strip() or None
-        if native_name:
-            mapping[alpha3.lower()] = native_name
+        part1 = value.get("part1")
+        if isinstance(part1, str) and len(part1) == 2 and part1.isalpha():
+            mapping[part1.lower()] = alpha3.lower()
+    return mapping
+
+
+@lru_cache(maxsize=1)
+def _alpha3_alias_mapping() -> dict[str, str]:
+    mapping = dict(_ALPHA3_ALIASES)
+    resource_path = Path(__file__).resolve().parent / "resources" / "iso639-3_living.json"
+    if not resource_path.exists():
+        return mapping
+    try:
+        payload = json.loads(resource_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return mapping
+    if not isinstance(payload, dict):
+        return mapping
+    for alpha3, value in payload.items():
+        if not isinstance(alpha3, str) or len(alpha3) != 3 or not isinstance(value, dict):
+            continue
+        canonical = alpha3.lower()
+        mapping[canonical] = canonical
+        for alias_key in ("part2B", "part2T"):
+            alias_value = value.get(alias_key)
+            if isinstance(alias_value, str) and len(alias_value) == 3 and alias_value.isalpha():
+                mapping[alias_value.lower()] = canonical
     return mapping
 
 
@@ -101,7 +181,8 @@ def _language_name_lookup() -> dict[str, str]:
     by_name: dict[str, str] = {}
     for alpha3, native_name in _alpha3_to_native_name_mapping().items():
         by_name[native_name.casefold()] = alpha3
-    # Common normalization aliases.
+    by_name.update(_LANGUAGE_NAME_ALIASES)
+    # Common normalization aliases with punctuation/diacritics variants.
     by_name["espanol"] = "spa"
     by_name["español"] = "spa"
     return by_name
@@ -126,12 +207,12 @@ def normalize_language_value(value: Any) -> str | None:
         return None
     folded = cleaned.casefold()
     if cleaned.isalpha() and len(cleaned) == 2:
-        alpha3 = _ALPHA2_TO_ALPHA3.get(folded)
+        alpha3 = _alpha2_to_alpha3_mapping().get(folded)
         if alpha3:
             return alpha3.upper()
         return None
     if cleaned.isalpha() and len(cleaned) == 3:
-        alpha3 = _ALPHA3_ALIASES.get(folded, folded)
+        alpha3 = _alpha3_alias_mapping().get(folded, folded)
         return alpha3.upper()
     if re.fullmatch(r"[A-Za-z][A-Za-z \-]*", cleaned):
         alpha3 = _language_name_lookup().get(folded)
