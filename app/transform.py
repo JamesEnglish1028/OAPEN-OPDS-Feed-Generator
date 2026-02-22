@@ -25,74 +25,23 @@ def _first_str(*values: Any) -> str | None:
     return None
 
 
-_ALPHA2_TO_ALPHA3: dict[str, str] = {
-    "en": "eng",
-    "es": "spa",
-    "fr": "fra",
-    "de": "deu",
-    "it": "ita",
-    "nl": "nld",
-    "no": "nor",
-    "pt": "por",
-    "ru": "rus",
-    "sv": "swe",
-}
+_ALPHA2_TO_ALPHA3: dict[str, str] = {}
 
 _ALPHA3_ALIASES: dict[str, str] = {
-    "eng": "eng",
+    # Non-standard alias observed in upstream records.
     "esp": "spa",
-    "spa": "spa",
-    "fre": "fra",
-    "fra": "fra",
-    "ger": "deu",
-    "deu": "deu",
-    "ita": "ita",
-    "dut": "nld",
-    "nld": "nld",
-    "nno": "nno",
-    "nob": "nob",
-    "nor": "nor",
-    "por": "por",
-    "rus": "rus",
-    "swe": "swe",
 }
 
-_DEFAULT_ALPHA3_TO_NAME: dict[str, str] = {
-    "eng": "English",
-    "spa": "Spanish",
-    "fra": "French",
-    "deu": "German",
-    "ita": "Italian",
-    "nld": "Dutch",
-    "nno": "Norsk nynorsk",
-    "nob": "Norsk bokmal",
-    "nor": "Norsk",
-    "por": "Portuguese",
-    "rus": "Russian",
-    "swe": "Swedish",
-}
+_DEFAULT_ALPHA3_TO_NAME: dict[str, str] = {}
 
 _LANGUAGE_NAME_ALIASES: dict[str, str] = {
-    "english": "eng",
-    "spanish": "spa",
-    "french": "fra",
-    "german": "deu",
-    "italian": "ita",
-    "dutch": "nld",
-    "portuguese": "por",
-    "russian": "rus",
-    "swedish": "swe",
+    # Common punctuation/diacritic variants.
     "norwegian": "nor",
     "norwegian nynorsk": "nno",
     "norwegian bokmal": "nob",
     "norwegian bokmål": "nob",
     "bokmal": "nob",
     "bokmål": "nob",
-    "nynorsk": "nno",
-    "norsk": "nor",
-    "norsk bokmal": "nob",
-    "norsk bokmål": "nob",
-    "norsk nynorsk": "nno",
 }
 
 
@@ -100,8 +49,9 @@ _LANGUAGE_NAME_ALIASES: dict[str, str] = {
 def _alpha3_to_native_name_mapping() -> dict[str, str]:
     mapping = dict(_DEFAULT_ALPHA3_TO_NAME)
     resources = [
-        Path(__file__).resolve().parent / "resources" / "alpha3toNativeNameMapping.json",
         Path(__file__).resolve().parent / "resources" / "iso639-3_living.json",
+        # Optional local overrides (applied last).
+        Path(__file__).resolve().parent / "resources" / "alpha3toNativeNameMapping.json",
     ]
     for resource_path in resources:
         if not resource_path.exists():
