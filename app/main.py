@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from app.cache import OpdsCache
 from app.db_migrations import run_migrations
 from app.harvest import run_incremental_for_all_checkpoints
 from app.scheduler import IncrementalHarvestScheduler
@@ -26,6 +27,7 @@ from app.validation import validate_palace_opds_feed
 
 app = FastAPI(title="OAPEN OPDS Feed Generator", version="0.1.0")
 store = PublicationStore(os.getenv("DATABASE_URL", "sqlite:///./oapen_opds.db"))
+opds_cache = OpdsCache()
 harvest_scheduler = IncrementalHarvestScheduler(
     store=store,
     hour_utc=int(os.getenv("SCHEDULER_DAILY_UTC_HOUR", "2")),
@@ -125,6 +127,7 @@ def _run_json_url_ingest_job(job_id: str, url: str) -> None:
     _set_job_state(job_id, status="running", started_at=_utcnow_iso())
     try:
         result = _ingest_json_url(url)
+        _invalidate_opds_cache()
         _set_job_state(
             job_id,
             status="completed",
@@ -377,6 +380,20 @@ def _build_feed_response(
     }
 
 
+def _invalidate_opds_cache() -> None:
+    opds_cache.invalidate_feed_keys()
+
+
+def _cached_opds_response(request: Request, builder) -> dict:
+    cache_key = opds_cache.key_for_request(request)
+    cached = opds_cache.get_json(cache_key)
+    if cached is not None:
+        return cached
+    payload = builder()
+    opds_cache.set_json(cache_key, payload)
+    return payload
+
+
 @app.get("/health")
 def health() -> dict:
     scheduler_enabled = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
@@ -386,6 +403,7 @@ def health() -> dict:
         "database_url": os.getenv("DATABASE_URL", "sqlite:///./oapen_opds.db"),
         "scheduler_enabled": scheduler_enabled,
         "scheduler_running": harvest_scheduler.is_running() if scheduler_enabled else False,
+        "opds_cache_enabled": opds_cache.is_enabled(),
     }
 
 
@@ -400,6 +418,7 @@ def startup() -> None:
 @app.on_event("shutdown")
 def shutdown() -> None:
     harvest_scheduler.shutdown()
+    opds_cache.close()
 
 
 @app.post("/ingest/json")
@@ -410,6 +429,7 @@ def ingest_json(request: JsonIngestRequest) -> dict:
         raise HTTPException(status_code=400, detail=f"JSON file not found on server: {request.path}") from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"JSON ingest failed: {exc}") from exc
+    _invalidate_opds_cache()
     return {
         "source": "json",
         "accepted": result.accepted,
@@ -424,6 +444,7 @@ def ingest_json_url(request: JsonUrlIngestRequest) -> dict:
         result = _ingest_json_url(request.url)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"JSON URL ingest failed: {exc}") from exc
+    _invalidate_opds_cache()
     return {
         "source": "json-url",
         "accepted": result.accepted,
@@ -478,6 +499,7 @@ def ingest_oai_pmh(request: OaiIngestRequest) -> dict:
     checkpoint_key = request.checkpoint_key or _checkpoint_key(request.base_url, request.metadata_prefix, request.set_name)
     prior_checkpoint = store.get_checkpoint(checkpoint_key) if request.incremental else None
     result = _ingest_oai(request)
+    _invalidate_opds_cache()
     checkpoint = store.get_checkpoint(checkpoint_key) if request.incremental else None
     return {
         "source": "oai-pmh",
@@ -496,43 +518,46 @@ def opds_feed(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
 ) -> dict:
-    total, subset = store.page(page=page, page_size=page_size)
-    response = _build_feed_response(
-        request=request,
-        title="OAPEN OPDS Catalog",
-        path="/opds",
-        page=page,
-        page_size=page_size,
-        total=total,
-        subset=subset,
-    )
+    def build_response() -> dict:
+        total, subset = store.page(page=page, page_size=page_size)
+        response = _build_feed_response(
+            request=request,
+            title="OAPEN OPDS Catalog",
+            path="/opds",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+        )
 
-    languages = store.list_language_counts()
-    year_counts = store.list_publication_year_counts()
-    response["navigation"] = [
-        {
-            "href": _build_url(request, f"/opds/years/{item['year']}", {}),
-            "title": f"Publication Year: {item['year']}",
-            "type": "application/opds+json",
-            "rel": "subsection",
-        }
-        for item in year_counts
-    ]
-    response["facets"] = [
-        {
-            "metadata": {"title": "Language"},
-            "links": [
-                {
-                    "href": _build_url(request, f"/opds/languages/{item['code']}", {}),
-                    "type": "application/opds+json",
-                    "title": _language_label(str(item["code"])),
-                    "properties": {"numberOfItems": int(item["count"])},
-                }
-                for item in languages
-            ],
-        }
-    ]
-    return response
+        languages = store.list_language_counts()
+        year_counts = store.list_publication_year_counts()
+        response["navigation"] = [
+            {
+                "href": _build_url(request, f"/opds/years/{item['year']}", {}),
+                "title": f"Publication Year: {item['year']}",
+                "type": "application/opds+json",
+                "rel": "subsection",
+            }
+            for item in year_counts
+        ]
+        response["facets"] = [
+            {
+                "metadata": {"title": "Language"},
+                "links": [
+                    {
+                        "href": _build_url(request, f"/opds/languages/{item['code']}", {}),
+                        "type": "application/opds+json",
+                        "title": _language_label(str(item["code"])),
+                        "properties": {"numberOfItems": int(item["count"])},
+                    }
+                    for item in languages
+                ],
+            }
+        ]
+        return response
+
+    return _cached_opds_response(request, build_response)
 
 
 @app.get("/opds/collections/{collection_slug}")
@@ -542,16 +567,19 @@ def opds_collection_feed(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
 ) -> dict:
-    total, subset = store.page_by_collection_slug(collection_slug=collection_slug, page=page, page_size=page_size)
-    return _build_feed_response(
-        request=request,
-        title=f"OAPEN Collection: {collection_slug}",
-        path=f"/opds/collections/{collection_slug}",
-        page=page,
-        page_size=page_size,
-        total=total,
-        subset=subset,
-    )
+    def build_response() -> dict:
+        total, subset = store.page_by_collection_slug(collection_slug=collection_slug, page=page, page_size=page_size)
+        return _build_feed_response(
+            request=request,
+            title=f"OAPEN Collection: {collection_slug}",
+            path=f"/opds/collections/{collection_slug}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+        )
+
+    return _cached_opds_response(request, build_response)
 
 
 @app.get("/opds/years/{year}")
@@ -561,16 +589,19 @@ def opds_year_feed(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
 ) -> dict:
-    total, subset = store.page_by_publication_year(year=year, page=page, page_size=page_size)
-    return _build_feed_response(
-        request=request,
-        title=f"OAPEN Publication Year: {year}",
-        path=f"/opds/years/{year}",
-        page=page,
-        page_size=page_size,
-        total=total,
-        subset=subset,
-    )
+    def build_response() -> dict:
+        total, subset = store.page_by_publication_year(year=year, page=page, page_size=page_size)
+        return _build_feed_response(
+            request=request,
+            title=f"OAPEN Publication Year: {year}",
+            path=f"/opds/years/{year}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+        )
+
+    return _cached_opds_response(request, build_response)
 
 
 @app.get("/opds/languages/{language_code}")
@@ -583,16 +614,19 @@ def opds_language_feed(
     normalized_language = normalize_language_value(language_code)
     if normalized_language is None:
         raise HTTPException(status_code=400, detail="language_code must be a 2-letter code, 3-letter code, or language name.")
-    total, subset = store.page_by_language(language=normalized_language, page=page, page_size=page_size)
-    return _build_feed_response(
-        request=request,
-        title=f"OAPEN Language: {_language_label(normalized_language)}",
-        path=f"/opds/languages/{normalized_language}",
-        page=page,
-        page_size=page_size,
-        total=total,
-        subset=subset,
-    )
+    def build_response() -> dict:
+        total, subset = store.page_by_language(language=normalized_language, page=page, page_size=page_size)
+        return _build_feed_response(
+            request=request,
+            title=f"OAPEN Language: {_language_label(normalized_language)}",
+            path=f"/opds/languages/{normalized_language}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+        )
+
+    return _cached_opds_response(request, build_response)
 
 
 @app.get("/opds/series/{series_slug}")
@@ -602,16 +636,19 @@ def opds_series_feed(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
 ) -> dict:
-    total, subset = store.page_by_series_slug(series_slug=series_slug, page=page, page_size=page_size)
-    return _build_feed_response(
-        request=request,
-        title=f"OAPEN Series: {series_slug}",
-        path=f"/opds/series/{series_slug}",
-        page=page,
-        page_size=page_size,
-        total=total,
-        subset=subset,
-    )
+    def build_response() -> dict:
+        total, subset = store.page_by_series_slug(series_slug=series_slug, page=page, page_size=page_size)
+        return _build_feed_response(
+            request=request,
+            title=f"OAPEN Series: {series_slug}",
+            path=f"/opds/series/{series_slug}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+        )
+
+    return _cached_opds_response(request, build_response)
 
 
 @app.get("/opds/publishers/{publisher_slug}")
@@ -621,16 +658,19 @@ def opds_publisher_feed(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
 ) -> dict:
-    total, subset = store.page_by_publisher_slug(publisher_slug=publisher_slug, page=page, page_size=page_size)
-    return _build_feed_response(
-        request=request,
-        title=f"OAPEN Publisher: {publisher_slug}",
-        path=f"/opds/publishers/{publisher_slug}",
-        page=page,
-        page_size=page_size,
-        total=total,
-        subset=subset,
-    )
+    def build_response() -> dict:
+        total, subset = store.page_by_publisher_slug(publisher_slug=publisher_slug, page=page, page_size=page_size)
+        return _build_feed_response(
+            request=request,
+            title=f"OAPEN Publisher: {publisher_slug}",
+            path=f"/opds/publishers/{publisher_slug}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+        )
+
+    return _cached_opds_response(request, build_response)
 
 
 @app.get("/publications/{publication_id}")
@@ -649,7 +689,9 @@ def harvest_checkpoints() -> dict:
 
 @app.post("/harvest/run")
 def run_harvest(request: ManualHarvestRequest) -> dict:
-    return run_incremental_for_all_checkpoints(store=store, max_records=request.max_records)
+    result = run_incremental_for_all_checkpoints(store=store, max_records=request.max_records)
+    _invalidate_opds_cache()
+    return result
 
 
 @app.get("/validate/palace")

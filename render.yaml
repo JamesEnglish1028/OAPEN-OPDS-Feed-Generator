@@ -5,6 +5,10 @@ databases:
     plan: free
 
 services:
+  - type: keyvalue
+    name: oapen-opds-cache
+    plan: free
+
   - type: web
     name: oapen-opds-feed-generator
     env: python
@@ -26,3 +30,10 @@ services:
         value: "2"
       - key: SCHEDULER_DAILY_UTC_MINUTE
         value: "0"
+      - key: OPDS_CACHE_TTL_SECONDS
+        value: "900"
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: oapen-opds-cache
+          property: connectionString

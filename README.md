@@ -27,6 +27,7 @@ Small service that ingests OAPEN metadata (JSON or OAI-PMH Dublin Core) and expo
 - Harvest checkpoint visibility (`GET /harvest/checkpoints`)
 - Alembic migration/versioning for schema changes
 - Daily scheduled incremental harvest job via APScheduler
+- Optional Redis/Valkey cache for OPDS feed responses (`/opds*`) with TTL + cache invalidation on ingest/harvest writes
 
 ## Quick start
 
@@ -56,6 +57,14 @@ Scheduler settings (optional):
 export SCHEDULER_ENABLED="true"
 export SCHEDULER_DAILY_UTC_HOUR="2"
 export SCHEDULER_DAILY_UTC_MINUTE="0"
+```
+
+OPDS cache settings (optional):
+
+```bash
+export REDIS_URL="redis://localhost:6379/0"
+export OPDS_CACHE_TTL_SECONDS="900"
+export OPDS_CACHE_PREFIX="opds-cache"
 ```
 
 Run migrations:
@@ -209,11 +218,13 @@ This repo includes:
    - `SCHEDULER_ENABLED=false` (recommended until you configure recurring harvest policy)
    - `SCHEDULER_DAILY_UTC_HOUR=2`
    - `SCHEDULER_DAILY_UTC_MINUTE=0`
+   - `OPDS_CACHE_TTL_SECONDS=900` (optional)
 4. Ensure Auto-Deploy is enabled (it is enabled in `render.yaml`).
 5. Push to `main`; Render will deploy automatically.
 
 ### Persistent Postgres mode
 
 - `render.yaml` provisions `oapen-opds-db` and injects its connection string into `DATABASE_URL`.
+- `render.yaml` provisions `oapen-opds-cache` (Render Key Value) and injects its connection string into `REDIS_URL`.
 - On first deploy, migrations run automatically at startup.
 - Data persists across service restarts/redeploys, so re-ingest is no longer required after each deployment.

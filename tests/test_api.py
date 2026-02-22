@@ -7,6 +7,7 @@ os.environ["SCHEDULER_ENABLED"] = "false"
 
 from fastapi.testclient import TestClient
 
+import app.main as main_module
 from app.main import app, store
 from app.store import PublicationStore
 
@@ -268,6 +269,79 @@ def test_language_normalization_and_omission(tmp_path) -> None:
     lower_case_language_feed = client.get("/opds/languages/en?page=1&page_size=10")
     assert lower_case_language_feed.status_code == 200
     assert lower_case_language_feed.json()["metadata"]["numberOfItems"] == 1
+
+
+class _FakeOpdsCache:
+    def __init__(self) -> None:
+        self._payloads: dict[str, dict] = {}
+        self.invalidations = 0
+
+    def key_for_request(self, request) -> str:
+        query = f"?{request.url.query}" if request.url.query else ""
+        return f"{request.url.path}{query}"
+
+    def get_json(self, key: str):
+        return self._payloads.get(key)
+
+    def set_json(self, key: str, payload: dict) -> None:
+        self._payloads[key] = payload
+
+    def invalidate_feed_keys(self) -> int:
+        count = len(self._payloads)
+        self.invalidations += 1
+        self._payloads.clear()
+        return count
+
+    def is_enabled(self) -> bool:
+        return True
+
+    def close(self) -> None:
+        return None
+
+
+def test_opds_feed_cache_hit_reuses_previous_response(monkeypatch) -> None:
+    _reset_store()
+    sample_path = Path(__file__).parent / "data" / "sample_oapen.json"
+    ingest = client.post("/ingest/json", json={"path": str(sample_path)})
+    assert ingest.status_code == 200
+
+    fake_cache = _FakeOpdsCache()
+    monkeypatch.setattr(main_module, "opds_cache", fake_cache)
+
+    page_calls = {"count": 0}
+    original_page = main_module.store.page
+
+    def counting_page(*args, **kwargs):
+        page_calls["count"] += 1
+        return original_page(*args, **kwargs)
+
+    monkeypatch.setattr(main_module.store, "page", counting_page)
+
+    first = client.get("/opds?page=1&page_size=2")
+    second = client.get("/opds?page=1&page_size=2")
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json() == second.json()
+    assert page_calls["count"] == 1
+
+
+def test_ingest_invalidates_opds_cache(monkeypatch) -> None:
+    _reset_store()
+    sample_path = Path(__file__).parent / "data" / "sample_oapen.json"
+    ingest = client.post("/ingest/json", json={"path": str(sample_path)})
+    assert ingest.status_code == 200
+
+    fake_cache = _FakeOpdsCache()
+    monkeypatch.setattr(main_module, "opds_cache", fake_cache)
+
+    cached = client.get("/opds?page=1&page_size=1")
+    assert cached.status_code == 200
+    assert len(fake_cache._payloads) == 1
+
+    again = client.post("/ingest/json", json={"path": str(sample_path)})
+    assert again.status_code == 200
+    assert fake_cache.invalidations >= 1
+    assert len(fake_cache._payloads) == 0
 
 
 def test_language_facet_titles_use_uppercase_native_names() -> None:
