@@ -492,6 +492,11 @@ def _build_feed_response(
     end = (page - 1) * page_size + len(subset)
     base_url = str(request.base_url).rstrip("/")
     publications = [_to_opds_publication(pub, base_url=base_url, repository_id=repository_id) for pub in subset]
+    repository = store.get_repository(repository_id)
+    repository_name = repository.name if repository else (
+        DEFAULT_REPOSITORY_NAME if repository_id == DEFAULT_REPOSITORY_ID else repository_id
+    )
+    is_default_repository = repository_id == DEFAULT_REPOSITORY_ID
 
     links = [{"rel": "self", "href": _build_url(request, path, {"page": page, "page_size": page_size}), "type": "application/opds+json"}]
     if end < total:
@@ -518,6 +523,9 @@ def _build_feed_response(
             "numberOfItems": total,
             "itemsPerPage": page_size,
             "currentPage": page,
+            "repositoryId": repository_id,
+            "repositoryName": repository_name,
+            "isDefaultRepository": is_default_repository,
         },
         "links": links,
         "publications": publications,
@@ -895,6 +903,51 @@ def opds_feed_repository(
     )
 
 
+@app.get("/opds/default")
+def opds_feed_default_alias(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    return opds_feed(request=request, page=page, page_size=page_size)
+
+
+@app.get("/opds/index")
+def opds_repository_index(request: Request) -> dict:
+    repositories = store.list_repositories(include_inactive=False)
+    base = str(request.base_url).rstrip("/")
+    links = []
+    for repository in repositories:
+        links.append(
+            {
+                "href": f"{base}/opds/{repository.repository_id}",
+                "title": repository.name,
+                "type": "application/opds+json",
+                "rel": "subsection",
+                "properties": {
+                    "repositoryId": repository.repository_id,
+                    "sourceType": repository.source_type,
+                    "isDefaultRepository": repository.repository_id == DEFAULT_REPOSITORY_ID,
+                },
+            }
+        )
+    return {
+        "metadata": {
+            "@type": "http://schema.org/DataFeed",
+            "title": "OPDS Repository Index",
+            "numberOfItems": len(links),
+        },
+        "links": [
+            {
+                "rel": "self",
+                "href": f"{base}/opds/index",
+                "type": "application/opds+json",
+            }
+        ],
+        "navigation": links,
+    }
+
+
 @app.get("/opds/collections/{collection_slug}")
 def opds_collection_feed(
     collection_slug: str,
@@ -1236,3 +1289,13 @@ def validate_palace_repository(
 ) -> dict:
     feed = opds_feed_repository(repository_id=repository_id, request=request, page=page, page_size=page_size)
     return validate_palace_opds_feed(feed)
+
+
+@app.get("/opds/{repository_id}")
+def opds_feed_repository_alias(
+    repository_id: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    return opds_feed_repository(repository_id=repository_id, request=request, page=page, page_size=page_size)

@@ -525,6 +525,23 @@ def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:
     repo_feed = client.get("/repositories/springer-oa/opds?page=1&page_size=10")
     assert repo_feed.status_code == 200
     assert repo_feed.json()["metadata"]["numberOfItems"] == 3
+    assert repo_feed.json()["metadata"]["repositoryId"] == "springer-oa"
+    assert repo_feed.json()["metadata"]["isDefaultRepository"] is False
+
+    default_alias = client.get("/opds/default?page=1&page_size=10")
+    assert default_alias.status_code == 200
+    assert default_alias.json()["metadata"]["repositoryId"] == "default"
+    assert default_alias.json()["metadata"]["isDefaultRepository"] is True
+
+    repo_alias = client.get("/opds/springer-oa?page=1&page_size=10")
+    assert repo_alias.status_code == 200
+    assert repo_alias.json()["metadata"]["repositoryId"] == "springer-oa"
+
+    index = client.get("/opds/index")
+    assert index.status_code == 200
+    entries = index.json()["navigation"]
+    assert any(item["properties"]["repositoryId"] == "default" for item in entries)
+    assert any(item["properties"]["repositoryId"] == "springer-oa" for item in entries)
 
 
 def test_springer_ingest_endpoint_uses_adapter(monkeypatch) -> None:
