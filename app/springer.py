@@ -153,6 +153,16 @@ def _normalize_springer_record(record: dict[str, Any], repository_id: str) -> No
     )
 
 
+def _is_book_content(record: dict[str, Any]) -> bool:
+    value = record.get("contentType")
+    if isinstance(value, str) and value.strip():
+        return value.strip().casefold() == "book"
+    publication_type = record.get("publicationType")
+    if isinstance(publication_type, str) and publication_type.strip():
+        return publication_type.strip().casefold() == "book"
+    return False
+
+
 class SpringerSource:
     def __init__(
         self,
@@ -196,6 +206,7 @@ class SpringerSource:
         repository: RepositoryConfig,
         max_records: int | None = None,
         start_offset: int | None = None,
+        books_only: bool = False,
     ) -> IngestResult:
         config = repository.config if isinstance(repository.config, dict) else {}
         api_key = _first_str(config.get("api_key"), config.get("apiKey"))
@@ -240,6 +251,9 @@ class SpringerSource:
 
             for record in records:
                 if not isinstance(record, dict):
+                    result.rejected += 1
+                    continue
+                if books_only and not _is_book_content(record):
                     result.rejected += 1
                     continue
                 normalized = _normalize_springer_record(record, repository_id=repository.repository_id)

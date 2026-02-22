@@ -540,8 +540,11 @@ def test_springer_ingest_endpoint_uses_adapter(monkeypatch) -> None:
     )
     assert create_repo.status_code == 200
 
-    def fake_ingest_repository(store, repository, max_records, start_offset=None):
+    captured = {"books_only": None}
+
+    def fake_ingest_repository(store, repository, max_records, start_offset=None, books_only=False):
         assert repository.repository_id == "springer-oa"
+        captured["books_only"] = books_only
         return IngestResult(accepted=2, rejected=1, errors=[])
 
     monkeypatch.setattr(main_module.springer_source, "ingest_repository", fake_ingest_repository)
@@ -551,9 +554,10 @@ def test_springer_ingest_endpoint_uses_adapter(monkeypatch) -> None:
         lambda checkpoint_key, repository_id=None: None,
     )
 
-    response = client.post("/repositories/springer-oa/ingest/springer", json={"max_records": 25})
+    response = client.post("/repositories/springer-oa/ingest/springer", json={"max_records": 25, "books_only": True})
     assert response.status_code == 200
     payload = response.json()
     assert payload["repository_id"] == "springer-oa"
     assert payload["accepted"] == 2
     assert payload["rejected"] == 1
+    assert captured["books_only"] is True

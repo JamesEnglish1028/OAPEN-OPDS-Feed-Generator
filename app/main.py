@@ -80,6 +80,7 @@ class SpringerIngestRequest(BaseModel):
     reset_checkpoint: bool = False
     clear_existing: bool = False
     start_offset: int | None = None
+    books_only: bool = False
 
 
 def _as_list(value):
@@ -783,6 +784,7 @@ def ingest_springer_repository(repository_id: str, request: SpringerIngestReques
             repository=repository,
             max_records=request.max_records,
             start_offset=request.start_offset if request.start_offset is not None else (1 if request.reset_checkpoint else None),
+            books_only=request.books_only,
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Springer ingest failed: {exc}") from exc
