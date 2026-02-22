@@ -298,6 +298,21 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
     raw = pub.raw if isinstance(pub.raw, dict) else {}
     metadata_src = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
 
+    schema_type = "http://schema.org/Book"
+    raw_schema_type = metadata_src.get("@type") if isinstance(metadata_src.get("@type"), str) else None
+    if isinstance(raw_schema_type, str) and raw_schema_type.strip():
+        schema_type = raw_schema_type.strip()
+    else:
+        content_like_values = [
+            raw.get("contentType"),
+            raw.get("publicationType"),
+            metadata_src.get("contentType"),
+            metadata_src.get("publicationType"),
+        ]
+        normalized_values = {str(value).strip().casefold() for value in content_like_values if isinstance(value, str) and value.strip()}
+        if "chapter" in normalized_values:
+            schema_type = "http://schema.org/Chapter"
+
     image_links = []
     for image in _as_list(raw.get("images")):
         if not isinstance(image, dict):
@@ -348,10 +363,26 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
             if base_url:
                 href = f"{base_url}{href}"
             series_entry["links"] = [{"href": href, "type": "application/opds+json"}]
+    springer_publication_name = None
+    if isinstance(raw.get("publicationName"), str) and raw.get("publicationName", "").strip():
+        springer_publication_name = raw.get("publicationName").strip()
+    elif isinstance(metadata_src.get("publicationName"), str) and metadata_src.get("publicationName", "").strip():
+        springer_publication_name = metadata_src.get("publicationName").strip()
+    springer_series_id = None
+    if isinstance(raw.get("seriesId"), str) and raw.get("seriesId", "").strip():
+        springer_series_id = raw.get("seriesId").strip()
+    elif isinstance(metadata_src.get("seriesId"), str) and metadata_src.get("seriesId", "").strip():
+        springer_series_id = metadata_src.get("seriesId").strip()
+    if series_entry is None and schema_type == "http://schema.org/Chapter" and springer_publication_name:
+        series_entry = {"name": springer_publication_name}
+    if series_entry is not None and springer_series_id:
+        series_entry["identifier"] = springer_series_id
 
     collection_value = None
     if pub.collection:
         collection_value = pub.collection
+    elif schema_type == "http://schema.org/Chapter" and springer_publication_name:
+        collection_value = springer_publication_name
 
     accessibility = []
     for item in _as_list(metadata_src.get("accessibility")):
@@ -368,7 +399,7 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
 
     metadata = without_none_values(
         {
-            "@type": "http://schema.org/Book",
+            "@type": schema_type,
             "title": pub.title,
             "identifier": pub.identifier or pub.publication_id,
             "modified": modified,

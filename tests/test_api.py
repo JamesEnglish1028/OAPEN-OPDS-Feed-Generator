@@ -435,6 +435,40 @@ def test_opds_metadata_omits_null_temporal_fields(tmp_path) -> None:
     assert "published" not in metadata
 
 
+def test_publication_metadata_type_maps_chapter_records(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "chapter_type_case.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "publications": [
+                    {
+                        "id": "chapter-1",
+                        "title": "A Chapter Record",
+                        "doi": "10.1007/1345_2025_301",
+                        "contentType": "Chapter",
+                        "publicationType": "Book",
+                        "publicationName": "Proceedings of Test Series",
+                        "seriesId": "1345",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+
+    publication = client.get("/publications/chapter-1")
+    assert publication.status_code == 200
+    payload = publication.json()
+    assert payload["metadata"]["@type"] == "http://schema.org/Chapter"
+    assert payload["metadata"]["belongsTo"]["collection"] == "Proceedings of Test Series"
+    assert payload["metadata"]["belongsTo"]["series"]["name"] == "Proceedings of Test Series"
+    assert payload["metadata"]["belongsTo"]["series"]["identifier"] == "1345"
+
+
 def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:
     _reset_store()
     create_repo = client.put(
@@ -475,7 +509,7 @@ def test_springer_ingest_endpoint_uses_adapter(monkeypatch) -> None:
     )
     assert create_repo.status_code == 200
 
-    def fake_ingest_repository(store, repository, max_records):
+    def fake_ingest_repository(store, repository, max_records, start_offset=None):
         assert repository.repository_id == "springer-oa"
         return IngestResult(accepted=2, rejected=1, errors=[])
 
