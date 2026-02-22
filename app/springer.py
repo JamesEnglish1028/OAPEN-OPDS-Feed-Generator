@@ -195,6 +195,7 @@ class SpringerSource:
         store: PublicationStore,
         repository: RepositoryConfig,
         max_records: int | None = None,
+        start_offset: int | None = None,
     ) -> IngestResult:
         config = repository.config if isinstance(repository.config, dict) else {}
         api_key = _first_str(config.get("api_key"), config.get("apiKey"))
@@ -216,14 +217,14 @@ class SpringerSource:
 
         checkpoint_key = f"springer::{repository.repository_id}"
         checkpoint = store.get_checkpoint(checkpoint_key, repository_id=repository.repository_id)
-        start_offset = 1
-        if checkpoint and checkpoint.state:
+        effective_start_offset = start_offset if isinstance(start_offset, int) and start_offset > 0 else 1
+        if start_offset is None and checkpoint and checkpoint.state:
             last_offset = checkpoint.state.get("last_offset")
             if isinstance(last_offset, int) and last_offset > 0:
-                start_offset = last_offset
+                effective_start_offset = last_offset
 
         result = IngestResult(accepted=0, rejected=0, errors=[])
-        offset = start_offset
+        offset = effective_start_offset
 
         while True:
             params = {

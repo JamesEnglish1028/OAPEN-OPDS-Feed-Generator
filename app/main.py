@@ -77,6 +77,9 @@ class RepositoryUpsertRequest(BaseModel):
 
 class SpringerIngestRequest(BaseModel):
     max_records: int | None = None
+    reset_checkpoint: bool = False
+    clear_existing: bool = False
+    start_offset: int | None = None
 
 
 def _as_list(value):
@@ -733,8 +736,17 @@ def ingest_springer_repository(repository_id: str, request: SpringerIngestReques
     repository = _get_repository_or_404(repository_id)
     if repository.source_type != "springer-openaccess":
         raise HTTPException(status_code=400, detail="Repository source_type must be springer-openaccess")
+    if request.clear_existing:
+        store.clear(repository_id=repository_id)
+    if request.reset_checkpoint:
+        store.clear_checkpoints(repository_id=repository_id)
     try:
-        result = springer_source.ingest_repository(store=store, repository=repository, max_records=request.max_records)
+        result = springer_source.ingest_repository(
+            store=store,
+            repository=repository,
+            max_records=request.max_records,
+            start_offset=request.start_offset if request.start_offset is not None else (1 if request.reset_checkpoint else None),
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Springer ingest failed: {exc}") from exc
     _invalidate_opds_cache(repository_id)
