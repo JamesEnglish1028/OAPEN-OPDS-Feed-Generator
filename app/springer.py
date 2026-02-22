@@ -124,13 +124,19 @@ class SpringerSource:
         self._max_retries = max_retries
         self._backoff_seconds = backoff_seconds
         self._session = requests.Session()
+        self._session.headers.update(
+            {
+                "Accept": "application/json",
+                "User-Agent": "oapen-opds-feed-generator/0.2 (+https://oapen-opds-feed-generator.onrender.com)",
+            }
+        )
 
-    def _request_page(self, params: dict[str, Any]) -> dict[str, Any]:
+    def _request_page(self, base_url: str, params: dict[str, Any]) -> dict[str, Any]:
         attempts = 0
         while True:
             attempts += 1
             try:
-                response = self._session.get(self._base_url, params=params, timeout=self._timeout_seconds)
+                response = self._session.get(base_url, params=params, timeout=self._timeout_seconds)
                 response.raise_for_status()
                 payload = response.json()
                 if not isinstance(payload, dict):
@@ -152,6 +158,15 @@ class SpringerSource:
         api_key = _first_str(config.get("api_key"), config.get("apiKey"))
         if api_key is None:
             raise ValueError("Repository config must include api_key")
+
+        base_url = _first_str(
+            config.get("base_url"),
+            config.get("endpoint"),
+            config.get("api_url"),
+            self._base_url,
+        )
+        if base_url is None:
+            raise ValueError("Springer base URL is not configured")
 
         query = _first_str(config.get("query")) or "type:Book"
         page_size = int(config.get("page_size", 50))
@@ -175,7 +190,7 @@ class SpringerSource:
                 "p": page_size,
                 "s": offset,
             }
-            payload = self._request_page(params)
+            payload = self._request_page(base_url=base_url, params=params)
             records = payload.get("records")
             if not isinstance(records, list) or not records:
                 break
@@ -197,7 +212,7 @@ class SpringerSource:
                 checkpoint_key=checkpoint_key,
                 repository_id=repository.repository_id,
                 source_type="springer-openaccess",
-                base_url=self._base_url,
+                base_url=base_url,
                 metadata_prefix="springer-openaccess",
                 set_name=None,
                 last_from_date=None,

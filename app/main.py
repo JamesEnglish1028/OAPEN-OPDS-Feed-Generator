@@ -32,7 +32,8 @@ DEFAULT_REPOSITORY_NAME = "Default OPDS Repository"
 app = FastAPI(title="OAPEN OPDS Feed Generator", version="0.2.0")
 store = PublicationStore(os.getenv("DATABASE_URL", "sqlite:///./oapen_opds.db"))
 opds_cache = OpdsCache()
-springer_source = SpringerSource(base_url=os.getenv("SPRINGER_OPENACCESS_BASE_URL", "https://api.springernature.com/openaccess/json"))
+springer_base_url = os.getenv("SPRINGER_OPENACCESS_BASE_URL", "").strip() or "https://api.springernature.com/openaccess/json"
+springer_source = SpringerSource(base_url=springer_base_url)
 harvest_scheduler = IncrementalHarvestScheduler(
     store=store,
     hour_utc=int(os.getenv("SCHEDULER_DAILY_UTC_HOUR", "2")),
