@@ -99,11 +99,11 @@ def _alpha3_to_native_name_mapping() -> dict[str, str]:
 @lru_cache(maxsize=1)
 def _language_name_lookup() -> dict[str, str]:
     by_name: dict[str, str] = {}
-    for canonical in _alpha3_to_native_name_mapping().values():
-        by_name[canonical.casefold()] = canonical
+    for alpha3, native_name in _alpha3_to_native_name_mapping().items():
+        by_name[native_name.casefold()] = alpha3
     # Common normalization aliases.
-    by_name["espanol"] = _alpha3_to_native_name_mapping().get("spa", "Spanish")
-    by_name["español"] = _alpha3_to_native_name_mapping().get("spa", "Spanish")
+    by_name["espanol"] = "spa"
+    by_name["español"] = "spa"
     return by_name
 
 
@@ -128,17 +128,24 @@ def normalize_language_value(value: Any) -> str | None:
     if cleaned.isalpha() and len(cleaned) == 2:
         alpha3 = _ALPHA2_TO_ALPHA3.get(folded)
         if alpha3:
-            return _alpha3_to_native_name_mapping().get(alpha3, alpha3.upper())
-        return cleaned.upper()
+            return alpha3.upper()
+        return None
     if cleaned.isalpha() and len(cleaned) == 3:
         alpha3 = _ALPHA3_ALIASES.get(folded, folded)
-        return _alpha3_to_native_name_mapping().get(alpha3, cleaned.upper())
+        return alpha3.upper()
     if re.fullmatch(r"[A-Za-z][A-Za-z \-]*", cleaned):
-        normalized = _language_name_lookup().get(folded)
-        if normalized:
-            return normalized
-        return " ".join(part.capitalize() for part in cleaned.split())
+        alpha3 = _language_name_lookup().get(folded)
+        if alpha3:
+            return alpha3.upper()
+        return None
     return None
+
+
+def native_name_for_language(value: Any) -> str | None:
+    alpha3 = normalize_language_value(value)
+    if not alpha3:
+        return None
+    return _alpha3_to_native_name_mapping().get(alpha3.lower())
 
 
 def first_valid_language(*values: Any) -> str | None:

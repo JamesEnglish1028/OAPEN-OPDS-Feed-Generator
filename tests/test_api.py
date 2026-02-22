@@ -244,19 +244,19 @@ def test_language_normalization_and_omission(tmp_path) -> None:
     assert ingest.json()["accepted"] == 6
 
     two_letter = client.get("/publications/lang-two").json()
-    assert two_letter["metadata"]["language"] == "English"
+    assert two_letter["metadata"]["language"] == "ENG"
 
     three_letter = client.get("/publications/lang-three").json()
-    assert three_letter["metadata"]["language"] == "Spanish"
+    assert three_letter["metadata"]["language"] == "SPA"
 
     three_letter_upper_rus = client.get("/publications/lang-three-uppercase-rus").json()
-    assert three_letter_upper_rus["metadata"]["language"] == "Russian"
+    assert three_letter_upper_rus["metadata"]["language"] == "RUS"
 
     three_letter_upper_dut = client.get("/publications/lang-three-uppercase-dut").json()
-    assert three_letter_upper_dut["metadata"]["language"] == "Dutch"
+    assert three_letter_upper_dut["metadata"]["language"] == "NLD"
 
     language_word = client.get("/publications/lang-word").json()
-    assert language_word["metadata"]["language"] == "Spanish"
+    assert language_word["metadata"]["language"] == "SPA"
 
     null_language = client.get("/publications/lang-null").json()
     assert "language" not in null_language["metadata"]
@@ -264,6 +264,19 @@ def test_language_normalization_and_omission(tmp_path) -> None:
     lower_case_language_feed = client.get("/opds/languages/en?page=1&page_size=10")
     assert lower_case_language_feed.status_code == 200
     assert lower_case_language_feed.json()["metadata"]["numberOfItems"] == 1
+
+
+def test_language_facet_titles_use_uppercase_native_names() -> None:
+    _reset_store()
+    sample_path = Path(__file__).parent / "data" / "sample_oapen.json"
+    ingest = client.post("/ingest/json", json={"path": str(sample_path)})
+    assert ingest.status_code == 200
+
+    root_feed = client.get("/opds?page=1&page_size=10")
+    assert root_feed.status_code == 200
+    language_facet_links = root_feed.json()["facets"][0]["links"]
+    titles = [item["title"] for item in language_facet_links]
+    assert "ENGLISH" in titles
 
 
 def test_opds_metadata_omits_null_temporal_fields(tmp_path) -> None:

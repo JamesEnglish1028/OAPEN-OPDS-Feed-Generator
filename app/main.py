@@ -16,6 +16,7 @@ from app.sources import iter_json_records, iter_json_records_from_url, load_oai_
 from app.store import IngestResult, PublicationStore
 from app.transform import (
     first_valid_publisher,
+    native_name_for_language,
     normalize_json_record,
     normalize_language_value,
     normalize_oai_record,
@@ -66,25 +67,6 @@ def _as_list(value):
         return value
     return [value]
 
-
-LANGUAGE_LABELS = {
-    "en": "English",
-    "eng": "English",
-    "fr": "French",
-    "fre": "French",
-    "de": "German",
-    "ger": "German",
-    "es": "Spanish",
-    "spa": "Spanish",
-    "it": "Italian",
-    "ita": "Italian",
-    "nl": "Dutch",
-    "nld": "Dutch",
-    "pt": "Portuguese",
-    "por": "Portuguese",
-    "sv": "Swedish",
-    "swe": "Swedish",
-}
 
 ingest_jobs: dict[str, dict] = {}
 ingest_jobs_lock = threading.Lock()
@@ -347,7 +329,8 @@ def _build_url(request: Request, path: str, params: dict[str, str | int]) -> str
 
 
 def _language_label(code: str) -> str:
-    return LANGUAGE_LABELS.get(code.lower(), code.upper())
+    native_name = native_name_for_language(code)
+    return native_name.upper() if native_name else code.upper()
 
 
 def _build_feed_response(
