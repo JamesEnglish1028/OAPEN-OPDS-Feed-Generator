@@ -33,6 +33,7 @@ _ALPHA2_TO_ALPHA3: dict[str, str] = {
     "it": "ita",
     "nl": "nld",
     "pt": "por",
+    "ru": "rus",
     "sv": "swe",
 }
 
@@ -48,6 +49,7 @@ _ALPHA3_ALIASES: dict[str, str] = {
     "dut": "nld",
     "nld": "nld",
     "por": "por",
+    "rus": "rus",
     "swe": "swe",
 }
 
@@ -59,6 +61,7 @@ _DEFAULT_ALPHA3_TO_NAME: dict[str, str] = {
     "ita": "Italian",
     "nld": "Dutch",
     "por": "Portuguese",
+    "rus": "Russian",
     "swe": "Swedish",
 }
 

@@ -229,6 +229,8 @@ def test_language_normalization_and_omission(tmp_path) -> None:
                 "publications": [
                     {"id": "lang-two", "title": "Language Two", "language": "en"},
                     {"id": "lang-three", "title": "Language Three", "language": "esp"},
+                    {"id": "lang-three-uppercase-rus", "title": "Language Three Uppercase RUS", "language": "RUS"},
+                    {"id": "lang-three-uppercase-dut", "title": "Language Three Uppercase DUT", "language": "DUT"},
                     {"id": "lang-word", "title": "Language Word", "language": "spanish"},
                     {"id": "lang-null", "title": "Language Null", "language": None},
                 ]
@@ -239,13 +241,19 @@ def test_language_normalization_and_omission(tmp_path) -> None:
 
     ingest = client.post("/ingest/json", json={"path": str(payload_path)})
     assert ingest.status_code == 200
-    assert ingest.json()["accepted"] == 4
+    assert ingest.json()["accepted"] == 6
 
     two_letter = client.get("/publications/lang-two").json()
     assert two_letter["metadata"]["language"] == "English"
 
     three_letter = client.get("/publications/lang-three").json()
     assert three_letter["metadata"]["language"] == "Spanish"
+
+    three_letter_upper_rus = client.get("/publications/lang-three-uppercase-rus").json()
+    assert three_letter_upper_rus["metadata"]["language"] == "Russian"
+
+    three_letter_upper_dut = client.get("/publications/lang-three-uppercase-dut").json()
+    assert three_letter_upper_dut["metadata"]["language"] == "Dutch"
 
     language_word = client.get("/publications/lang-word").json()
     assert language_word["metadata"]["language"] == "Spanish"
