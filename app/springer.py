@@ -48,7 +48,42 @@ def _extract_year(value: Any) -> int | None:
     return year if 1900 <= year <= 2199 else None
 
 
-def _build_springer_acquisition_links(record: dict[str, Any]) -> list[dict[str, str]]:
+def _normalize_probed_media_type(value: str | None) -> str | None:
+    if not value:
+        return None
+    media_type = value.split(";", 1)[0].strip().lower()
+    if media_type == "application/pdf":
+        return "application/pdf"
+    if media_type == "application/epub+zip":
+        return "application/epub+zip"
+    return None
+
+
+def _probe_media_type(session: requests.Session, url: str, timeout_seconds: int) -> str | None:
+    for method in ("head", "get"):
+        try:
+            if method == "head":
+                response = session.head(url, allow_redirects=True, timeout=timeout_seconds)
+            else:
+                response = session.get(url, allow_redirects=True, timeout=timeout_seconds, stream=True)
+            response.raise_for_status()
+            return _normalize_probed_media_type(response.headers.get("Content-Type"))
+        except Exception:
+            continue
+        finally:
+            try:
+                response.close()  # type: ignore[name-defined]
+            except Exception:
+                pass
+    return None
+
+
+def _build_springer_acquisition_links(
+    record: dict[str, Any],
+    session: requests.Session | None = None,
+    timeout_seconds: int = 45,
+    verify_link_types: bool = False,
+) -> list[dict[str, str]]:
     doi = _first_str(record.get("doi"))
     candidate_bases: list[str] = []
     if doi:
@@ -80,17 +115,28 @@ def _build_springer_acquisition_links(record: dict[str, Any]) -> list[dict[str, 
             if href in seen:
                 continue
             seen.add(href)
+            resolved_media_type = media_type
+            if verify_link_types and session is not None:
+                probed = _probe_media_type(session=session, url=href, timeout_seconds=timeout_seconds)
+                if probed is not None:
+                    resolved_media_type = probed
             links.append(
                 {
                     "href": href,
                     "rel": "http://opds-spec.org/acquisition/open-access",
-                    "type": media_type,
+                    "type": resolved_media_type,
                 }
             )
     return links
 
 
-def _normalize_springer_record(record: dict[str, Any], repository_id: str) -> NormalizedPublication | None:
+def _normalize_springer_record(
+    record: dict[str, Any],
+    repository_id: str,
+    session: requests.Session | None = None,
+    timeout_seconds: int = 45,
+    verify_link_types: bool = False,
+) -> NormalizedPublication | None:
     title = _first_str(record.get("title"))
     if title is None:
         return None
@@ -112,7 +158,12 @@ def _normalize_springer_record(record: dict[str, Any], repository_id: str) -> No
     published = _first_str(record.get("publicationDate"), record.get("coverDate"), record.get("onlineDate"), record.get("date"))
     publisher = _first_str(record.get("publisher"), record.get("publicationName"))
 
-    links = _build_springer_acquisition_links(record)
+    links = _build_springer_acquisition_links(
+        record,
+        session=session,
+        timeout_seconds=timeout_seconds,
+        verify_link_types=verify_link_types,
+    )
     for url_item in _as_list(record.get("url")):
         if not isinstance(url_item, dict):
             continue
@@ -207,6 +258,7 @@ class SpringerSource:
         max_records: int | None = None,
         start_offset: int | None = None,
         books_only: bool = False,
+        verify_link_types: bool = False,
     ) -> IngestResult:
         config = repository.config if isinstance(repository.config, dict) else {}
         api_key = _first_str(config.get("api_key"), config.get("apiKey"))
@@ -256,7 +308,13 @@ class SpringerSource:
                 if books_only and not _is_book_content(record):
                     result.rejected += 1
                     continue
-                normalized = _normalize_springer_record(record, repository_id=repository.repository_id)
+                normalized = _normalize_springer_record(
+                    record,
+                    repository_id=repository.repository_id,
+                    session=self._session,
+                    timeout_seconds=self._timeout_seconds,
+                    verify_link_types=verify_link_types,
+                )
                 if normalized is None:
                     result.rejected += 1
                     continue
