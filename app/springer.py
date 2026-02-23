@@ -48,6 +48,52 @@ def _extract_year(value: Any) -> int | None:
     return year if 1900 <= year <= 2199 else None
 
 
+def _normalize_isbn(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = re.sub(r"[^0-9Xx]", "", value)
+    return cleaned.upper() if cleaned else None
+
+
+def _build_springer_cover_links(record: dict[str, Any]) -> list[dict[str, str]]:
+    raw_isbn = _first_str(record.get("electronicIsbn"), record.get("printIsbn"))
+    isbn = _normalize_isbn(raw_isbn)
+    series_id = _first_str(record.get("seriesId"))
+
+    candidate_specs: list[tuple[str, str]] = []
+    if isbn:
+        candidate_specs.extend(
+            [
+                (f"https://covers.springernature.com/books/jpg_width_95_pixels/{isbn}.jpg", "http://opds-spec.org/image/thumbnail"),
+                (f"https://covers.springernature.com/books/jpg_width_153_pixels/{isbn}.jpg", "http://opds-spec.org/image"),
+                (f"https://covers.springernature.com/books/jpg_width_200_pixels/{isbn}.jpg", "http://opds-spec.org/image"),
+            ]
+        )
+    elif series_id:
+        candidate_specs.extend(
+            [
+                (f"https://covers.springernature.com/series/jpg_width_95_pixels/{series_id}.jpg", "http://opds-spec.org/image/thumbnail"),
+                (f"https://covers.springernature.com/series/jpg_width_153_pixels/{series_id}.jpg", "http://opds-spec.org/image"),
+                (f"https://covers.springernature.com/series/jpg_width_200_pixels/{series_id}.jpg", "http://opds-spec.org/image"),
+            ]
+        )
+
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for href, rel in candidate_specs:
+        if href in seen:
+            continue
+        seen.add(href)
+        out.append(
+            {
+                "href": href,
+                "rel": rel,
+                "type": "image/jpeg",
+            }
+        )
+    return out
+
+
 def _normalize_probed_media_type(value: str | None) -> str | None:
     if not value:
         return None
@@ -136,6 +182,7 @@ def _normalize_springer_record(
     session: requests.Session | None = None,
     timeout_seconds: int = 45,
     verify_link_types: bool = False,
+    include_covers: bool = True,
 ) -> NormalizedPublication | None:
     title = _first_str(record.get("title"))
     if title is None:
@@ -177,6 +224,8 @@ def _normalize_springer_record(
             "rel": "alternate",
             "type": media_type,
         })
+    if include_covers:
+        links.extend(_build_springer_cover_links(record))
 
     subjects = [value.strip() for value in _as_list(record.get("keyword")) if isinstance(value, str) and value.strip()]
 
@@ -259,6 +308,7 @@ class SpringerSource:
         start_offset: int | None = None,
         books_only: bool = False,
         verify_link_types: bool = False,
+        include_covers: bool = True,
     ) -> IngestResult:
         config = repository.config if isinstance(repository.config, dict) else {}
         api_key = _first_str(config.get("api_key"), config.get("apiKey"))
@@ -314,6 +364,7 @@ class SpringerSource:
                     session=self._session,
                     timeout_seconds=self._timeout_seconds,
                     verify_link_types=verify_link_types,
+                    include_covers=include_covers,
                 )
                 if normalized is None:
                     result.rejected += 1
