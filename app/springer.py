@@ -370,7 +370,7 @@ class SpringerSource:
             raise ValueError("Springer base URL is not configured")
 
         query = _first_str(config.get("query")) or "type:Book"
-        page_size = int(config.get("page_size", 50))
+        page_size = int(config.get("page_size", 25))
         page_size = max(1, min(page_size, 100))
 
         checkpoint_key = f"springer::{repository.repository_id}"
