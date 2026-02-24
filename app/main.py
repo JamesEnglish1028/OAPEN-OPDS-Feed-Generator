@@ -14,7 +14,7 @@ from app.db_migrations import run_migrations
 from app.harvest import run_incremental_for_all_checkpoints
 from app.scheduler import IncrementalHarvestScheduler
 from app.sources import iter_json_records, iter_json_records_from_url, load_oai_dc_records
-from app.springer import SpringerSource
+from app.springer import SpringerApiError, SpringerSource
 from app.store import IngestResult, PublicationStore, RepositoryConfig
 from app.transform import (
     first_valid_publisher,
@@ -798,6 +798,33 @@ def ingest_springer_repository(repository_id: str, request: SpringerIngestReques
             verify_link_types=request.verify_link_types,
             include_covers=request.include_covers,
         )
+    except SpringerApiError as exc:
+        detail_payload = {
+            "error": "springer_ingest_failed",
+            "message": str(exc),
+        }
+        if exc.url:
+            detail_payload["upstream_url"] = exc.url
+        if exc.retry_after:
+            detail_payload["retry_after"] = exc.retry_after
+        if exc.body_excerpt:
+            detail_payload["upstream_excerpt"] = exc.body_excerpt
+
+        if exc.status_code == 429:
+            detail_payload["error"] = "springer_rate_limited"
+            raise HTTPException(status_code=429, detail=detail_payload) from exc
+
+        if exc.status_code == 403 and exc.body_excerpt and "premium feature" in exc.body_excerpt.casefold():
+            detail_payload["error"] = "blocked_by_api_plan"
+            detail_payload["message"] = (
+                "Springer API access blocked by plan restriction for this request. "
+                "Contact supportapi@springernature.com."
+            )
+            raise HTTPException(status_code=403, detail=detail_payload) from exc
+
+        if exc.status_code:
+            raise HTTPException(status_code=exc.status_code, detail=detail_payload) from exc
+        raise HTTPException(status_code=400, detail=detail_payload) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Springer ingest failed: {exc}") from exc
     _invalidate_opds_cache(repository_id)
