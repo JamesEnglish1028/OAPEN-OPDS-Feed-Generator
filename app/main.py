@@ -77,6 +77,7 @@ class RepositoryUpsertRequest(BaseModel):
 
 class SpringerIngestRequest(BaseModel):
     max_records: int | None = None
+    max_requests_per_run: int | None = None
     reset_checkpoint: bool = False
     clear_existing: bool = False
     start_offset: int | None = None
@@ -793,6 +794,7 @@ def ingest_springer_repository(repository_id: str, request: SpringerIngestReques
             store=store,
             repository=repository,
             max_records=request.max_records,
+            max_requests_per_run=request.max_requests_per_run,
             start_offset=request.start_offset if request.start_offset is not None else (1 if request.reset_checkpoint else None),
             books_only=request.books_only,
             verify_link_types=request.verify_link_types,

@@ -354,6 +354,7 @@ class SpringerSource:
         books_only: bool = False,
         verify_link_types: bool = False,
         include_covers: bool = True,
+        max_requests_per_run: int | None = None,
     ) -> IngestResult:
         config = repository.config if isinstance(repository.config, dict) else {}
         api_key = _first_str(config.get("api_key"), config.get("apiKey"))
@@ -383,8 +384,12 @@ class SpringerSource:
 
         result = IngestResult(accepted=0, rejected=0, errors=[])
         offset = effective_start_offset
+        requests_made = 0
+        processed_total = 0
 
         while True:
+            if max_requests_per_run is not None and requests_made >= max_requests_per_run:
+                break
             params = {
                 "api_key": api_key,
                 "q": query,
@@ -392,6 +397,7 @@ class SpringerSource:
                 "s": offset,
             }
             payload = self._request_page(base_url=base_url, params=params)
+            requests_made += 1
             records = payload.get("records")
             if not isinstance(records, list) or not records:
                 break
@@ -399,9 +405,11 @@ class SpringerSource:
             for record in records:
                 if not isinstance(record, dict):
                     result.rejected += 1
+                    processed_total += 1
                     continue
                 if books_only and not _is_book_content(record):
                     result.rejected += 1
+                    processed_total += 1
                     continue
                 normalized = _normalize_springer_record(
                     record,
@@ -413,10 +421,12 @@ class SpringerSource:
                 )
                 if normalized is None:
                     result.rejected += 1
+                    processed_total += 1
                     continue
                 store.upsert(normalized)
                 result.accepted += 1
-                if max_records is not None and result.accepted >= max_records:
+                processed_total += 1
+                if max_records is not None and processed_total >= max_records:
                     break
 
             store.upsert_checkpoint(
@@ -435,7 +445,7 @@ class SpringerSource:
                 },
             )
 
-            if max_records is not None and result.accepted >= max_records:
+            if max_records is not None and processed_total >= max_records:
                 break
 
             if len(records) < page_size:
