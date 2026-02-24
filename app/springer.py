@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import random
 import re
 import time
@@ -43,6 +44,13 @@ def _first_str(*values: Any) -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+def _is_placeholder_secret(value: str | None) -> bool:
+    if value is None:
+        return False
+    stripped = value.strip()
+    return stripped.startswith("<") and stripped.endswith(">")
 
 
 def _slugify(value: str | None) -> str | None:
@@ -357,9 +365,15 @@ class SpringerSource:
         max_requests_per_run: int | None = None,
     ) -> IngestResult:
         config = repository.config if isinstance(repository.config, dict) else {}
-        api_key = _first_str(config.get("api_key"), config.get("apiKey"))
+        api_key = _first_str(
+            config.get("api_key"),
+            config.get("apiKey"),
+            os.getenv("SPRINGER_OPENACCESS_API_KEY", ""),
+        )
+        if _is_placeholder_secret(api_key):
+            api_key = _first_str(os.getenv("SPRINGER_OPENACCESS_API_KEY", ""))
         if api_key is None:
-            raise ValueError("Repository config must include api_key")
+            raise ValueError("Repository config must include api_key or set SPRINGER_OPENACCESS_API_KEY")
 
         base_url = _first_str(
             config.get("base_url"),

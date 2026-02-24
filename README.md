@@ -69,6 +69,7 @@ export OPDS_CACHE_TTL_SECONDS="900"
 export OPDS_CACHE_PREFIX="opds-cache"
 export OPDS_CACHE_INVALIDATE_EVERY_N_UPSERTS="0"
 export SPRINGER_OPENACCESS_BASE_URL="https://api.springernature.com/openaccess/json"
+export SPRINGER_OPENACCESS_API_KEY="<SPRINGER_API_KEY>"
 ```
 
 `OPDS_CACHE_INVALIDATE_EVERY_N_UPSERTS` controls progressive cache refresh during long ingests.  
@@ -143,10 +144,12 @@ curl -X PUT http://127.0.0.1:8000/repositories/springer-oa \
   -d '{
     "source_type":"springer-openaccess",
     "name":"Springer Nature OA Books",
-    "config":{"api_key":"<SPRINGER_API_KEY>","query":"type:Book","page_size":50},
+    "config":{"query":"type:Book","page_size":50},
     "is_active":true
   }'
 ```
+
+If `config.api_key` is omitted or a placeholder, the app falls back to `SPRINGER_OPENACCESS_API_KEY`.
 
 Run Springer ingest for that repository:
 
