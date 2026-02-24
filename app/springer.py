@@ -13,6 +13,10 @@ from app.store import IngestResult, PublicationStore, RepositoryConfig
 from app.transform import normalize_language_value
 
 
+class SpringerApiError(RuntimeError):
+    pass
+
+
 def _as_list(value: Any) -> list[Any]:
     if value is None:
         return []
@@ -278,8 +282,8 @@ class SpringerSource:
         self._session = requests.Session()
         self._session.headers.update(
             {
-                "Accept": "application/json",
-                "User-Agent": "oapen-opds-feed-generator/0.2 (+https://oapen-opds-feed-generator.onrender.com)",
+                "Accept": "*/*",
+                "User-Agent": "curl/8.7.1",
             }
         )
 
@@ -292,13 +296,34 @@ class SpringerSource:
                 response.raise_for_status()
                 payload = response.json()
                 if not isinstance(payload, dict):
-                    raise ValueError("Springer API returned a non-object response")
+                    raise SpringerApiError("Springer API returned a non-object response")
                 return payload
-            except Exception:
-                if attempts > self._max_retries:
-                    raise
+            except requests.exceptions.HTTPError as exc:
+                response = exc.response
+                status_code = response.status_code if response is not None else 0
+                retry_after = response.headers.get("Retry-After") if response is not None else None
+                body_snippet = ""
+                if response is not None:
+                    body_snippet = (response.text or "").strip()
+                    if len(body_snippet) > 300:
+                        body_snippet = f"{body_snippet[:300]}..."
+                error_message = (
+                    f"Springer API HTTP {status_code} for url={response.url if response is not None else base_url}"
+                    f"{f' retry_after={retry_after}' if retry_after else ''}"
+                    f"{f' body={body_snippet}' if body_snippet else ''}"
+                )
+                should_retry = status_code in {429, 500, 502, 503, 504}
+                if attempts > self._max_retries or not should_retry:
+                    raise SpringerApiError(error_message) from exc
                 sleep_seconds = self._backoff_seconds * (2 ** (attempts - 1)) + random.uniform(0, 0.25)
                 time.sleep(sleep_seconds)
+            except requests.exceptions.RequestException as exc:
+                if attempts > self._max_retries:
+                    raise SpringerApiError(f"Springer network error: {exc}") from exc
+                sleep_seconds = self._backoff_seconds * (2 ** (attempts - 1)) + random.uniform(0, 0.25)
+                time.sleep(sleep_seconds)
+            except Exception as exc:
+                raise SpringerApiError(f"Springer request failed: {exc}") from exc
 
     def ingest_repository(
         self,
