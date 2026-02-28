@@ -541,6 +541,30 @@ def _build_feed_response(
     }
 
 
+def _language_path_prefix(repository_id: str) -> str:
+    if repository_id == DEFAULT_REPOSITORY_ID:
+        return "/opds/languages"
+    return f"/repositories/{repository_id}/opds/languages"
+
+
+def _attach_language_facets(request: Request, response: dict, language_counts: list[dict[str, str | int]], repository_id: str) -> dict:
+    response["facets"] = [
+        {
+            "metadata": {"title": "Language"},
+            "links": [
+                {
+                    "href": _build_url(request, f"{_language_path_prefix(repository_id)}/{item['code']}", {}),
+                    "type": "application/opds+json",
+                    "title": _language_label(str(item["code"])),
+                    "properties": {"numberOfItems": int(item["count"])},
+                }
+                for item in language_counts
+            ],
+        }
+    ]
+    return response
+
+
 def _invalidate_opds_cache(repository_id: str | None = None) -> None:
     if repository_id is None:
         opds_cache.invalidate_feed_keys()
@@ -874,10 +898,8 @@ def _opds_feed_for_repository(
 
         if repository_id == DEFAULT_REPOSITORY_ID:
             year_path_prefix = "/opds/years"
-            language_path_prefix = "/opds/languages"
         else:
             year_path_prefix = f"/repositories/{repository_id}/opds/years"
-            language_path_prefix = f"/repositories/{repository_id}/opds/languages"
 
         response["navigation"] = [
             {
@@ -888,21 +910,7 @@ def _opds_feed_for_repository(
             }
             for item in year_counts
         ]
-        response["facets"] = [
-            {
-                "metadata": {"title": "Language"},
-                "links": [
-                    {
-                        "href": _build_url(request, f"{language_path_prefix}/{item['code']}", {}),
-                        "type": "application/opds+json",
-                        "title": _language_label(str(item["code"])),
-                        "properties": {"numberOfItems": int(item["count"])},
-                    }
-                    for item in languages
-                ],
-            }
-        ]
-        return response
+        return _attach_language_facets(request=request, response=response, language_counts=languages, repository_id=repository_id)
 
     return _cached_opds_response(request, build_response, repository_id=repository_id)
 
@@ -1054,7 +1062,7 @@ def opds_year_feed(
 ) -> dict:
     def build_response() -> dict:
         total, subset = store.page_by_publication_year(year=year, page=page, page_size=page_size, repository_id=DEFAULT_REPOSITORY_ID)
-        return _build_feed_response(
+        response = _build_feed_response(
             request=request,
             title=f"Publication Year: {year}",
             path=f"/opds/years/{year}",
@@ -1062,6 +1070,13 @@ def opds_year_feed(
             page_size=page_size,
             total=total,
             subset=subset,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        language_counts = store.list_language_counts_by_publication_year(year=year, repository_id=DEFAULT_REPOSITORY_ID)
+        return _attach_language_facets(
+            request=request,
+            response=response,
+            language_counts=language_counts,
             repository_id=DEFAULT_REPOSITORY_ID,
         )
 
@@ -1080,7 +1095,7 @@ def opds_year_feed_repository(
 
     def build_response() -> dict:
         total, subset = store.page_by_publication_year(year=year, page=page, page_size=page_size, repository_id=repository_id)
-        return _build_feed_response(
+        response = _build_feed_response(
             request=request,
             title=f"Publication Year: {year}",
             path=f"/repositories/{repository_id}/opds/years/{year}",
@@ -1088,6 +1103,13 @@ def opds_year_feed_repository(
             page_size=page_size,
             total=total,
             subset=subset,
+            repository_id=repository_id,
+        )
+        language_counts = store.list_language_counts_by_publication_year(year=year, repository_id=repository_id)
+        return _attach_language_facets(
+            request=request,
+            response=response,
+            language_counts=language_counts,
             repository_id=repository_id,
         )
 
@@ -1112,7 +1134,7 @@ def opds_language_feed(
             page_size=page_size,
             repository_id=DEFAULT_REPOSITORY_ID,
         )
-        return _build_feed_response(
+        response = _build_feed_response(
             request=request,
             title=f"Language: {_language_label(normalized_language)}",
             path=f"/opds/languages/{normalized_language}",
@@ -1120,6 +1142,12 @@ def opds_language_feed(
             page_size=page_size,
             total=total,
             subset=subset,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        return _attach_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts(repository_id=DEFAULT_REPOSITORY_ID),
             repository_id=DEFAULT_REPOSITORY_ID,
         )
 
@@ -1146,7 +1174,7 @@ def opds_language_feed_repository(
             page_size=page_size,
             repository_id=repository_id,
         )
-        return _build_feed_response(
+        response = _build_feed_response(
             request=request,
             title=f"Language: {_language_label(normalized_language)}",
             path=f"/repositories/{repository_id}/opds/languages/{normalized_language}",
@@ -1154,6 +1182,12 @@ def opds_language_feed_repository(
             page_size=page_size,
             total=total,
             subset=subset,
+            repository_id=repository_id,
+        )
+        return _attach_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts(repository_id=repository_id),
             repository_id=repository_id,
         )
 

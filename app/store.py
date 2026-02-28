@@ -368,6 +368,21 @@ class PublicationStore:
             rows = session.execute(statement).all()
             return [{"code": code, "count": count} for code, count in rows if code]
 
+    def list_language_counts_by_publication_year(self, year: int, repository_id: str = "default") -> list[dict[str, str | int]]:
+        with self._session() as session:
+            statement = (
+                select(PublicationRow.language, sqla_func.count(PublicationRow.publication_id))
+                .where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.publication_year == year,
+                    PublicationRow.language.is_not(None),
+                )
+                .group_by(PublicationRow.language)
+                .order_by(PublicationRow.language.asc())
+            )
+            rows = session.execute(statement).all()
+            return [{"code": code, "count": count} for code, count in rows if code]
+
     def list_publication_year_counts(self, repository_id: str = "default") -> list[dict[str, int]]:
         with self._session() as session:
             statement = (
