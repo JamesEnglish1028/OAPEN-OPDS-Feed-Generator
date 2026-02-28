@@ -499,8 +499,15 @@ def _build_feed_response(
         DEFAULT_REPOSITORY_NAME if repository_id == DEFAULT_REPOSITORY_ID else repository_id
     )
     is_default_repository = repository_id == DEFAULT_REPOSITORY_ID
+    last_page = max(1, (total + page_size - 1) // page_size) if page_size > 0 else 1
+    start_path = "/opds" if is_default_repository else f"/repositories/{repository_id}/opds"
 
-    links = [{"rel": "self", "href": _build_url(request, path, {"page": page, "page_size": page_size}), "type": "application/opds+json"}]
+    links = [
+        {"rel": "self", "href": _build_url(request, path, {"page": page, "page_size": page_size}), "type": "application/opds+json"},
+        {"rel": "start", "href": _build_url(request, start_path, {}), "type": "application/opds+json"},
+        {"rel": "first", "href": _build_url(request, path, {"page": 1, "page_size": page_size}), "type": "application/opds+json"},
+        {"rel": "last", "href": _build_url(request, path, {"page": last_page, "page_size": page_size}), "type": "application/opds+json"},
+    ]
     if end < total:
         links.append(
             {
