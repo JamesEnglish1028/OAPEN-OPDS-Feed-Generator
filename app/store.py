@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, String, Text, create_engine, func as sqla_func, select
+from sqlalchemy import Boolean, DateTime, String, Text, and_, create_engine, func as sqla_func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql import func
@@ -339,6 +339,56 @@ class PublicationStore:
             statement = (
                 select(PublicationRow)
                 .where(PublicationRow.repository_id == repository_id, PublicationRow.publisher_slug == publisher_slug)
+                .order_by(PublicationRow.source_publication_id.asc(), PublicationRow.publication_id.asc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            rows = session.scalars(statement).all()
+            return total, [self._to_publication(row) for row in rows]
+
+    def search_publications(
+        self,
+        *,
+        repository_id: str = "default",
+        query: str | None = None,
+        title: str | None = None,
+        author: str | None = None,
+        publisher: str | None = None,
+        series: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[int, list[NormalizedPublication]]:
+        offset = (page - 1) * page_size
+        filters = [PublicationRow.repository_id == repository_id]
+
+        def like_filter(column, value: str):
+            return column.ilike(f"%{value.strip()}%")
+
+        keyword = (query or "").strip()
+        if keyword:
+            filters.append(
+                or_(
+                    like_filter(PublicationRow.title, keyword),
+                    like_filter(PublicationRow.authors_json, keyword),
+                    like_filter(PublicationRow.publisher, keyword),
+                    like_filter(PublicationRow.series_name, keyword),
+                )
+            )
+        if title and title.strip():
+            filters.append(like_filter(PublicationRow.title, title))
+        if author and author.strip():
+            filters.append(like_filter(PublicationRow.authors_json, author))
+        if publisher and publisher.strip():
+            filters.append(like_filter(PublicationRow.publisher, publisher))
+        if series and series.strip():
+            filters.append(like_filter(PublicationRow.series_name, series))
+
+        where_clause = and_(*filters)
+        with self._session() as session:
+            total = session.scalar(select(sqla_func.count()).select_from(PublicationRow).where(where_clause)) or 0
+            statement = (
+                select(PublicationRow)
+                .where(where_clause)
                 .order_by(PublicationRow.source_publication_id.asc(), PublicationRow.publication_id.asc())
                 .offset(offset)
                 .limit(page_size)

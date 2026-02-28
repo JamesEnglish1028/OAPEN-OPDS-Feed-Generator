@@ -501,12 +501,15 @@ def _build_feed_response(
     is_default_repository = repository_id == DEFAULT_REPOSITORY_ID
     last_page = max(1, (total + page_size - 1) // page_size) if page_size > 0 else 1
     start_path = "/opds" if is_default_repository else f"/repositories/{repository_id}/opds"
+    search_path = "/opds/search" if is_default_repository else f"/repositories/{repository_id}/opds/search"
+    search_template_href = f"{base_url}{search_path}" + "{?query,title,author,publisher,series}"
 
     links = [
         {"rel": "self", "href": _build_url(request, path, {"page": page, "page_size": page_size}), "type": "application/opds+json"},
         {"rel": "start", "href": _build_url(request, start_path, {}), "type": "application/opds+json"},
         {"rel": "first", "href": _build_url(request, path, {"page": 1, "page_size": page_size}), "type": "application/opds+json"},
         {"rel": "last", "href": _build_url(request, path, {"page": last_page, "page_size": page_size}), "type": "application/opds+json"},
+        {"rel": "search", "href": search_template_href, "type": "application/opds+json", "templated": True},
     ]
     if path != start_path:
         links.append({"rel": "up", "href": _build_url(request, start_path, {}), "type": "application/opds+json"})
@@ -969,6 +972,107 @@ def opds_feed_default_alias(
     page_size: int = Query(default=50, ge=1, le=500),
 ) -> dict:
     return opds_feed(request=request, page=page, page_size=page_size)
+
+
+def _search_feed_for_repository(
+    repository_id: str,
+    request: Request,
+    page: int,
+    page_size: int,
+    query: str | None,
+    title: str | None,
+    author: str | None,
+    publisher: str | None,
+    series: str | None,
+    path: str,
+) -> dict:
+    def build_response() -> dict:
+        total, subset = store.search_publications(
+            repository_id=repository_id,
+            query=query,
+            title=title,
+            author=author,
+            publisher=publisher,
+            series=series,
+            page=page,
+            page_size=page_size,
+        )
+        title_parts = ["Search Results"]
+        if query:
+            title_parts.append(f'query="{query}"')
+        if title:
+            title_parts.append(f'title="{title}"')
+        if author:
+            title_parts.append(f'author="{author}"')
+        if publisher:
+            title_parts.append(f'publisher="{publisher}"')
+        if series:
+            title_parts.append(f'series="{series}"')
+        feed_title = " | ".join(title_parts)
+        return _build_feed_response(
+            request=request,
+            title=feed_title,
+            path=path,
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=repository_id,
+        )
+
+    return _cached_opds_response(request, build_response, repository_id=repository_id)
+
+
+@app.get("/opds/search")
+def opds_search(
+    request: Request,
+    query: str | None = Query(default=None),
+    title: str | None = Query(default=None),
+    author: str | None = Query(default=None),
+    publisher: str | None = Query(default=None),
+    series: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    return _search_feed_for_repository(
+        repository_id=DEFAULT_REPOSITORY_ID,
+        request=request,
+        page=page,
+        page_size=page_size,
+        query=query,
+        title=title,
+        author=author,
+        publisher=publisher,
+        series=series,
+        path="/opds/search",
+    )
+
+
+@app.get("/repositories/{repository_id}/opds/search")
+def opds_search_repository(
+    repository_id: str,
+    request: Request,
+    query: str | None = Query(default=None),
+    title: str | None = Query(default=None),
+    author: str | None = Query(default=None),
+    publisher: str | None = Query(default=None),
+    series: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    _get_repository_or_404(repository_id)
+    return _search_feed_for_repository(
+        repository_id=repository_id,
+        request=request,
+        page=page,
+        page_size=page_size,
+        query=query,
+        title=title,
+        author=author,
+        publisher=publisher,
+        series=series,
+        path=f"/repositories/{repository_id}/opds/search",
+    )
 
 
 @app.get("/opds/index")

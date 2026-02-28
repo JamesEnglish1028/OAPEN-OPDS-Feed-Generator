@@ -44,6 +44,7 @@ def test_ingest_json_and_opds_pagination() -> None:
     assert page_1_json["facets"][0]["metadata"]["title"] == "Language"
     assert page_1_json["navigation"][0]["href"].endswith("/opds/years/2026")
     assert page_1_json["navigation"][0]["title"] == "Publication Year: 2026"
+    assert any(link["rel"] == "search" and link.get("templated") is True for link in page_1_json["links"])
 
     feed_page_2 = client.get("/opds?page=2&page_size=1")
     assert feed_page_2.status_code == 200
@@ -186,6 +187,33 @@ def test_collection_and_language_subfeeds() -> None:
     assert publisher_feed.status_code == 200
     publisher_json = publisher_feed.json()
     assert publisher_json["metadata"]["numberOfItems"] == 3
+
+
+def test_opds_search_endpoint() -> None:
+    _reset_store()
+    sample_path = Path(__file__).parent / "data" / "sample_oapen.json"
+    ingest = client.post("/ingest/json", json={"path": str(sample_path)})
+    assert ingest.status_code == 200
+
+    title_search = client.get("/opds/search?title=Open%20Access%20Book%20Three&page=1&page_size=10")
+    assert title_search.status_code == 200
+    title_json = title_search.json()
+    assert title_json["metadata"]["numberOfItems"] == 1
+    assert title_json["publications"][0]["metadata"]["title"] == "Open Access Book Three"
+    assert any(link["rel"] == "start" for link in title_json["links"])
+
+    author_search = client.get("/opds/search?author=Carol&page=1&page_size=10")
+    assert author_search.status_code == 200
+    author_json = author_search.json()
+    assert author_json["metadata"]["numberOfItems"] == 1
+
+    publisher_search = client.get("/opds/search?publisher=OAPEN%20Press&page=1&page_size=10")
+    assert publisher_search.status_code == 200
+    assert publisher_search.json()["metadata"]["numberOfItems"] == 3
+
+    series_search = client.get("/opds/search?series=Demo%20Series&page=1&page_size=10")
+    assert series_search.status_code == 200
+    assert series_search.json()["metadata"]["numberOfItems"] == 1
 
 
 def test_publisher_normalization_for_opds_metadata(tmp_path) -> None:
