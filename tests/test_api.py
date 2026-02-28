@@ -168,6 +168,7 @@ def test_collection_and_language_subfeeds() -> None:
     assert language_json["metadata"]["numberOfItems"] == 3
     assert "facets" in language_json
     assert language_json["facets"][0]["metadata"]["title"] == "Language"
+    assert any(link["rel"] == "start" for link in language_json["links"])
 
     year_feed = client.get("/opds/years/2026?page=1&page_size=10")
     assert year_feed.status_code == 200
@@ -177,6 +178,7 @@ def test_collection_and_language_subfeeds() -> None:
     assert "facets" in year_json
     assert year_json["facets"][0]["metadata"]["title"] == "Language"
     assert len(year_json["facets"][0]["links"]) >= 1
+    assert any(link["rel"] == "start" for link in year_json["links"])
 
     publisher_feed = client.get("/opds/publishers/oapen-press?page=1&page_size=10")
     assert publisher_feed.status_code == 200

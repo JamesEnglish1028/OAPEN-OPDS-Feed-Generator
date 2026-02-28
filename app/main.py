@@ -548,6 +548,17 @@ def _language_path_prefix(repository_id: str) -> str:
 
 
 def _attach_language_facets(request: Request, response: dict, language_counts: list[dict[str, str | int]], repository_id: str) -> dict:
+    links = response.setdefault("links", [])
+    is_default_repository = repository_id == DEFAULT_REPOSITORY_ID
+    start_path = "/opds" if is_default_repository else f"/repositories/{repository_id}/opds"
+    if not any(isinstance(link, dict) and link.get("rel") == "start" for link in links):
+        links.append(
+            {
+                "rel": "start",
+                "href": _build_url(request, start_path, {}),
+                "type": "application/opds+json",
+            }
+        )
     response["facets"] = [
         {
             "metadata": {"title": "Language"},
