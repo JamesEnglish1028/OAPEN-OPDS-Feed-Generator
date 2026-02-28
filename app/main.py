@@ -508,6 +508,8 @@ def _build_feed_response(
         {"rel": "first", "href": _build_url(request, path, {"page": 1, "page_size": page_size}), "type": "application/opds+json"},
         {"rel": "last", "href": _build_url(request, path, {"page": last_page, "page_size": page_size}), "type": "application/opds+json"},
     ]
+    if path != start_path:
+        links.append({"rel": "up", "href": _build_url(request, start_path, {}), "type": "application/opds+json"})
     if end < total:
         links.append(
             {
