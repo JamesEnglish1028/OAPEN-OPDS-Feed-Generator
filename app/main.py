@@ -608,7 +608,7 @@ def _attach_browse_facets(request: Request, response: dict, repository_id: str) 
         {
             "href": _build_url(request, f"{collection_prefix}/{item['slug']}", {}),
             "type": "application/opds+json",
-            "title": f"Collection: {item['name']}",
+            "title": item["name"],
             "properties": {"numberOfItems": int(item["count"])},
         }
         for item in store.list_collection_counts(repository_id=repository_id)
@@ -629,7 +629,7 @@ def _attach_browse_facets(request: Request, response: dict, repository_id: str) 
     response["facets"] = [
         *existing_facets,
         {
-            "metadata": {"title": "Browse"},
+            "metadata": {"title": "Collection"},
             "links": browse_links,
         },
     ]

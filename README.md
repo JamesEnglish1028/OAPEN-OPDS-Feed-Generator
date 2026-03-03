@@ -23,7 +23,7 @@ Small service that ingests OAPEN metadata (JSON or OAI-PMH Dublin Core) and expo
 - OAPEN metadata extensions mapped into OPDS output (`belongsTo`, `images`, `altIdentifier`, `accessibility`)
 - Root OPDS navigation links (`rel: subsection`) for publication year feeds
 - OPDS language facet compact collection (`facets`) with `numberOfItems`
-- Additional `Browse` facet group for Collection and Series feeds
+- Additional `Collection` facet group for Collection and Series feeds
 - `metadata.publisher.links` points to publisher-specific OPDS subfeeds
 - `metadata.belongsTo.collection` includes `name` + `links`
 - OPDS 2 search link and search endpoint (`/opds/search{?query,title,author,publisher,series,collection,subject}`)
