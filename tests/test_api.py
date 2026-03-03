@@ -813,3 +813,4 @@ def test_admin_ui_renders_repository_and_opds_json_controls() -> None:
     assert "Multi-Repository OPDS Admin" in body
     assert "/repositories/" in body
     assert "/ingest/opds-json" in body
+    assert "delete-repo" in body

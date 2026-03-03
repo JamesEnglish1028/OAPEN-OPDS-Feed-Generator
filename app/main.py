@@ -1022,6 +1022,7 @@ def admin_ui() -> str:
           <label class="check"><input id="repo-active" type="checkbox" checked> Active repository</label>
           <div class="actions">
             <button type="submit">Save Repository</button>
+            <button type="button" class="ghost" id="delete-repo">Delete Repository</button>
             <button type="button" class="ghost" id="refresh-repos">Refresh List</button>
           </div>
         </form>
@@ -1185,6 +1186,33 @@ def admin_ui() -> str:
       }
     }
 
+    async function deleteRepository() {
+      const repositoryId = document.getElementById("repo-id").value.trim();
+      if (!repositoryId) {
+        show({ error: "Select or enter a repository first." });
+        return;
+      }
+      if (repositoryId === "default") {
+        show({ error: "The default repository cannot be deleted." });
+        return;
+      }
+      const confirmed = window.confirm("Delete repository '" + repositoryId + "' and all of its harvested data?");
+      if (!confirmed) {
+        return;
+      }
+      const response = await fetch("/repositories/" + encodeURIComponent(repositoryId), {
+        method: "DELETE",
+      });
+      const data = await readJson(response);
+      show(data);
+      if (response.ok) {
+        document.getElementById("repo-form").reset();
+        document.getElementById("repo-config").value = "{}";
+        document.getElementById("repo-active").checked = true;
+        await loadRepositories();
+      }
+    }
+
     async function runHarvest(event) {
       event.preventDefault();
       const repositoryId = repoSelect.value;
@@ -1216,6 +1244,9 @@ def admin_ui() -> str:
     }
 
     document.getElementById("repo-form").addEventListener("submit", saveRepository);
+    document.getElementById("delete-repo").addEventListener("click", () => {
+      deleteRepository().catch((error) => show({ error: String(error) }));
+    });
     document.getElementById("harvest-form").addEventListener("submit", runHarvest);
     document.getElementById("refresh-repos").addEventListener("click", loadRepositories);
     document.getElementById("load-checkpoints").addEventListener("click", loadCheckpoints);
