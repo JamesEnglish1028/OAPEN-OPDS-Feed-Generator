@@ -502,7 +502,7 @@ def _build_feed_response(
     last_page = max(1, (total + page_size - 1) // page_size) if page_size > 0 else 1
     start_path = "/opds" if is_default_repository else f"/repositories/{repository_id}/opds"
     search_path = "/opds/search" if is_default_repository else f"/repositories/{repository_id}/opds/search"
-    search_template_href = f"{base_url}{search_path}" + "{?query,title,author,publisher,series}"
+    search_template_href = f"{base_url}{search_path}" + "{?query,title,author,publisher,series,collection}"
 
     links = [
         {"rel": "self", "href": _build_url(request, path, {"page": page, "page_size": page_size}), "type": "application/opds+json"},
@@ -984,6 +984,7 @@ def _search_feed_for_repository(
     author: str | None,
     publisher: str | None,
     series: str | None,
+    collection: str | None,
     path: str,
 ) -> dict:
     def build_response() -> dict:
@@ -994,6 +995,7 @@ def _search_feed_for_repository(
             author=author,
             publisher=publisher,
             series=series,
+            collection=collection,
             page=page,
             page_size=page_size,
         )
@@ -1008,6 +1010,8 @@ def _search_feed_for_repository(
             title_parts.append(f'publisher="{publisher}"')
         if series:
             title_parts.append(f'series="{series}"')
+        if collection:
+            title_parts.append(f'collection="{collection}"')
         feed_title = " | ".join(title_parts)
         return _build_feed_response(
             request=request,
@@ -1031,6 +1035,7 @@ def opds_search(
     author: str | None = Query(default=None),
     publisher: str | None = Query(default=None),
     series: str | None = Query(default=None),
+    collection: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
 ) -> dict:
@@ -1044,6 +1049,7 @@ def opds_search(
         author=author,
         publisher=publisher,
         series=series,
+        collection=collection,
         path="/opds/search",
     )
 
@@ -1057,6 +1063,7 @@ def opds_search_repository(
     author: str | None = Query(default=None),
     publisher: str | None = Query(default=None),
     series: str | None = Query(default=None),
+    collection: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
 ) -> dict:
@@ -1071,6 +1078,7 @@ def opds_search_repository(
         author=author,
         publisher=publisher,
         series=series,
+        collection=collection,
         path=f"/repositories/{repository_id}/opds/search",
     )
 

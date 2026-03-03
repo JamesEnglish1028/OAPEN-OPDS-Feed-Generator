@@ -44,7 +44,12 @@ def test_ingest_json_and_opds_pagination() -> None:
     assert page_1_json["facets"][0]["metadata"]["title"] == "Language"
     assert page_1_json["navigation"][0]["href"].endswith("/opds/years/2026")
     assert page_1_json["navigation"][0]["title"] == "Publication Year: 2026"
-    assert any(link["rel"] == "search" and link.get("templated") is True for link in page_1_json["links"])
+    assert any(
+        link["rel"] == "search"
+        and link.get("templated") is True
+        and "collection" in link.get("href", "")
+        for link in page_1_json["links"]
+    )
 
     feed_page_2 = client.get("/opds?page=2&page_size=1")
     assert feed_page_2.status_code == 200
@@ -214,6 +219,10 @@ def test_opds_search_endpoint() -> None:
     series_search = client.get("/opds/search?series=Demo%20Series&page=1&page_size=10")
     assert series_search.status_code == 200
     assert series_search.json()["metadata"]["numberOfItems"] == 1
+
+    collection_search = client.get("/opds/search?collection=SciFi%20Classics&page=1&page_size=10")
+    assert collection_search.status_code == 200
+    assert collection_search.json()["metadata"]["numberOfItems"] == 1
 
 
 def test_publisher_normalization_for_opds_metadata(tmp_path) -> None:
