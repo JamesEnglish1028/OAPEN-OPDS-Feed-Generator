@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from urllib.parse import urljoin
 
-from app.sources import load_oai_dc_records
+from app.sources import extract_json_records, load_json_payload_from_url, load_oai_dc_records
 from app.store import HarvestCheckpoint, PublicationStore
-from app.transform import normalize_oai_record
+from app.transform import normalize_json_record, normalize_oai_record
 
 
 @dataclass
@@ -29,6 +30,33 @@ def _today_ymd() -> str:
 def _max_date_string(values: list[str | None]) -> str | None:
     candidates = sorted([value for value in values if value])
     return candidates[-1] if candidates else None
+
+
+def _set_repository_on_publication(publication, repository_id: str):
+    publication.repository_id = repository_id
+    if not publication.source_publication_id:
+        publication.source_publication_id = publication.publication_id
+    return publication
+
+
+def _extract_opds_next_url(payload: object, current_url: str) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    links = payload.get("links")
+    if not isinstance(links, list):
+        return None
+    for link in links:
+        if not isinstance(link, dict):
+            continue
+        rel = link.get("rel")
+        rels = rel if isinstance(rel, list) else [rel]
+        normalized_rels = {str(item).strip().casefold() for item in rels if isinstance(item, str) and item.strip()}
+        if "next" not in normalized_rels:
+            continue
+        href = link.get("href")
+        if isinstance(href, str) and href.strip():
+            return urljoin(current_url, href.strip())
+    return None
 
 
 def run_incremental_for_checkpoint(
@@ -55,18 +83,21 @@ def run_incremental_for_checkpoint(
         if normalized is None:
             rejected += 1
             continue
-        store.upsert(normalized)
+        store.upsert(_set_repository_on_publication(normalized, checkpoint.repository_id))
         harvested_dates.append(normalized.published)
         accepted += 1
 
     latest_harvested = _max_date_string(harvested_dates) or effective_until
     store.upsert_checkpoint(
         checkpoint_key=checkpoint.checkpoint_key,
+        repository_id=checkpoint.repository_id,
+        source_type=checkpoint.source_type,
         base_url=checkpoint.base_url,
         metadata_prefix=checkpoint.metadata_prefix,
         set_name=checkpoint.set_name,
         last_from_date=effective_from,
         last_until_date=latest_harvested,
+        state=checkpoint.state,
     )
     return HarvestRunSummary(
         checkpoint_key=checkpoint.checkpoint_key,
@@ -81,16 +112,92 @@ def run_incremental_for_checkpoint(
     )
 
 
+def run_incremental_for_opds_json_checkpoint(
+    store: PublicationStore,
+    checkpoint: HarvestCheckpoint,
+    max_records: int | None = None,
+) -> HarvestRunSummary:
+    accepted = 0
+    rejected = 0
+    processed = 0
+    today = _today_ymd()
+    state = checkpoint.state if isinstance(checkpoint.state, dict) else {}
+    next_url_value = state.get("next_url")
+    current_url = next_url_value if isinstance(next_url_value, str) and next_url_value.strip() else checkpoint.base_url
+    last_url = current_url
+    next_url_to_store = checkpoint.base_url
+    pages_crawled = 0
+
+    while current_url:
+        payload = load_json_payload_from_url(current_url)
+        last_url = current_url
+        pages_crawled += 1
+        for raw in extract_json_records(payload):
+            normalized = normalize_json_record(raw)
+            processed += 1
+            if normalized is None:
+                rejected += 1
+            else:
+                store.upsert(_set_repository_on_publication(normalized, checkpoint.repository_id))
+                accepted += 1
+            if max_records and processed >= max_records:
+                break
+
+        next_url = _extract_opds_next_url(payload, current_url)
+        if max_records and processed >= max_records:
+            next_url_to_store = next_url or checkpoint.base_url
+            break
+        if not next_url:
+            next_url_to_store = checkpoint.base_url
+            break
+        next_url_to_store = next_url
+        current_url = next_url
+
+    store.upsert_checkpoint(
+        checkpoint_key=checkpoint.checkpoint_key,
+        repository_id=checkpoint.repository_id,
+        source_type=checkpoint.source_type,
+        base_url=checkpoint.base_url,
+        metadata_prefix=checkpoint.metadata_prefix,
+        set_name=checkpoint.set_name,
+        last_from_date=checkpoint.last_from_date,
+        last_until_date=today,
+        state={
+            "next_url": next_url_to_store,
+            "last_url": last_url,
+            "pages_crawled": pages_crawled,
+            "records_processed": processed,
+        },
+    )
+
+    return HarvestRunSummary(
+        checkpoint_key=checkpoint.checkpoint_key,
+        repository_id=checkpoint.repository_id,
+        source_type=checkpoint.source_type,
+        base_url=checkpoint.base_url,
+        accepted=accepted,
+        rejected=rejected,
+        from_date=None,
+        until_date=today,
+        updated_checkpoint_until=today,
+    )
+
+
 def run_incremental_for_all_checkpoints(
     store: PublicationStore,
     max_records: int | None = None,
 ) -> dict:
-    checkpoints = store.list_checkpoints(source_type="oai-pmh")
+    checkpoints = store.list_checkpoints()
     results: list[HarvestRunSummary] = []
 
     for checkpoint in checkpoints:
         try:
-            summary = run_incremental_for_checkpoint(store=store, checkpoint=checkpoint, max_records=max_records)
+            if checkpoint.source_type == "oai-pmh":
+                summary = run_incremental_for_checkpoint(store=store, checkpoint=checkpoint, max_records=max_records)
+            elif checkpoint.source_type == "opds-json":
+                summary = run_incremental_for_opds_json_checkpoint(store=store, checkpoint=checkpoint, max_records=max_records)
+            else:
+                raise ValueError(f"Unsupported checkpoint source_type: {checkpoint.source_type}")
             results.append(summary)
         except Exception as exc:  # pragma: no cover - scheduler safety net
             results.append(
@@ -112,4 +219,5 @@ def run_incremental_for_all_checkpoints(
         "run_at": datetime.now(UTC).isoformat(),
         "checkpoints_total": len(checkpoints),
         "results": [item.__dict__ for item in results],
+        "max_records": max_records,
     }

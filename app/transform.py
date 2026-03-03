@@ -270,6 +270,27 @@ def _extract_publication_year(value: Any) -> int | None:
     return year if 1900 <= year <= 2199 else None
 
 
+def _extract_name_list(value: Any) -> list[str]:
+    names: list[str] = []
+    for item in _as_list(value):
+        if isinstance(item, str):
+            candidate = item.strip()
+            if candidate:
+                names.append(candidate)
+            continue
+        if not isinstance(item, dict):
+            continue
+        candidate = _first_str(
+            item.get("name"),
+            item.get("label"),
+            item.get("title"),
+            item.get("creator"),
+        )
+        if candidate:
+            names.append(candidate)
+    return names
+
+
 def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
     metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
     identifier = _first_str(
@@ -291,15 +312,15 @@ def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
 
     author_field = raw.get("authors") or raw.get("author") or raw.get("creators") or metadata.get("author")
     editor_field = metadata.get("editor")
-    authors = [str(v).strip() for v in _as_list(author_field) if str(v).strip()]
+    authors = _extract_name_list(author_field)
     if not authors:
-        authors = [str(v).strip() for v in _as_list(editor_field) if str(v).strip()]
+        authors = _extract_name_list(editor_field)
     if not authors:
         creator_nodes = raw.get("creator")
         if isinstance(creator_nodes, list):
             authors = [str(v.get("name", "")).strip() for v in creator_nodes if isinstance(v, dict) and str(v.get("name", "")).strip()]
 
-    subjects = [str(v).strip() for v in _as_list(raw.get("subjects") or raw.get("keywords") or metadata.get("subject")) if str(v).strip()]
+    subjects = _extract_name_list(raw.get("subjects") or raw.get("keywords") or metadata.get("subject"))
     language = first_valid_language(raw.get("language"), raw.get("lang"), metadata.get("language"))
     published_candidate = _first_str(
         raw.get("published"),
@@ -318,22 +339,34 @@ def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
     )
     publisher_metadata = first_valid_publisher(raw.get("publisher"), metadata.get("publisher"), metadata.get("imprint"))
     publisher_value = primary_publisher_name(publisher_metadata)
-    funders = [str(v).strip() for v in _as_list(metadata.get("funder")) if isinstance(v, str) and str(v).strip()]
-    collection = funders[0] if funders else None
-    # Keep root navigation funder-based only; do not mirror publisher into collection.
-    if collection and publisher_value and collection.casefold() == publisher_value.casefold():
-        collection = None
-
     belongs_to = metadata.get("belongsTo")
     series_name: str | None = None
     series_position: int | None = None
+    collection: str | None = None
     if isinstance(belongs_to, dict):
-        series_name = _first_str(belongs_to.get("series"), belongs_to.get("name"))
-        raw_series_position = belongs_to.get("seriesNumber")
+        series_value = belongs_to.get("series")
+        if isinstance(series_value, dict):
+            series_name = _first_str(series_value.get("name"), series_value.get("title"))
+            raw_series_position = series_value.get("position")
+        else:
+            series_name = _first_str(series_value, belongs_to.get("name"))
+            raw_series_position = belongs_to.get("seriesNumber")
         if isinstance(raw_series_position, int):
             series_position = raw_series_position
         elif isinstance(raw_series_position, str) and raw_series_position.strip().isdigit():
             series_position = int(raw_series_position.strip())
+        collection_value = belongs_to.get("collection")
+        if isinstance(collection_value, dict):
+            collection = _first_str(collection_value.get("name"), collection_value.get("title"))
+        else:
+            collection = _first_str(collection_value)
+
+    if not collection:
+        funders = [str(v).strip() for v in _as_list(metadata.get("funder")) if isinstance(v, str) and str(v).strip()]
+        collection = funders[0] if funders else None
+    # Keep root navigation funder-based only; do not mirror publisher into collection.
+    if collection and publisher_value and collection.casefold() == publisher_value.casefold():
+        collection = None
 
     return NormalizedPublication(
         publication_id=identifier,

@@ -4,7 +4,7 @@ import os
 import threading
 import uuid
 from datetime import UTC, datetime
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urljoin
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -13,7 +13,7 @@ from app.cache import OpdsCache
 from app.db_migrations import run_migrations
 from app.harvest import run_incremental_for_all_checkpoints
 from app.scheduler import IncrementalHarvestScheduler
-from app.sources import iter_json_records, iter_json_records_from_url, load_oai_dc_records
+from app.sources import extract_json_records, iter_json_records, iter_json_records_from_url, load_json_payload_from_url, load_oai_dc_records
 from app.store import IngestResult, PublicationStore, RepositoryConfig
 from app.transform import (
     first_valid_publisher,
@@ -44,6 +44,16 @@ class JsonIngestRequest(BaseModel):
 
 class JsonUrlIngestRequest(BaseModel):
     url: str = Field(description="HTTP(S) URL to a JSON metadata file.")
+
+
+class OpdsJsonIngestRequest(BaseModel):
+    url: str = Field(description="HTTP(S) URL to an OPDS-like JSON feed.")
+    max_records: int | None = Field(default=None, ge=1)
+    max_pages: int | None = Field(default=None, ge=1)
+    follow_next: bool = True
+    timeout_seconds: int = Field(default=120, ge=1, le=600)
+    incremental: bool = True
+    checkpoint_key: str | None = None
 
 
 class IngestJobRequest(BaseModel):
@@ -188,6 +198,106 @@ def _ingest_json_url(url: str, repository_id: str = DEFAULT_REPOSITORY_ID) -> In
             repository_id=repository_id,
         )
     return result
+
+
+def _opds_json_checkpoint_key(repository_id: str, url: str) -> str:
+    return f"opds-json|{repository_id}|{url}"
+
+
+def _extract_opds_next_url(payload: object, current_url: str) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    links = payload.get("links")
+    if not isinstance(links, list):
+        return None
+    for link in links:
+        if not isinstance(link, dict):
+            continue
+        rel = link.get("rel")
+        rels = rel if isinstance(rel, list) else [rel]
+        normalized_rels = {str(item).strip().casefold() for item in rels if isinstance(item, str) and item.strip()}
+        if "next" not in normalized_rels:
+            continue
+        href = link.get("href")
+        if isinstance(href, str) and href.strip():
+            return urljoin(current_url, href.strip())
+    return None
+
+
+def _ingest_opds_json(request: OpdsJsonIngestRequest, repository_id: str = DEFAULT_REPOSITORY_ID) -> tuple[IngestResult, dict]:
+    result = IngestResult(accepted=0, rejected=0, errors=[])
+    last_invalidation_count = 0
+    checkpoint_key = request.checkpoint_key or _opds_json_checkpoint_key(repository_id, request.url)
+    checkpoint = store.get_checkpoint(checkpoint_key, repository_id=repository_id) if request.incremental else None
+    effective_url = request.url
+    if checkpoint and isinstance(checkpoint.state, dict):
+        next_url = checkpoint.state.get("next_url")
+        if isinstance(next_url, str) and next_url.strip():
+            effective_url = next_url.strip()
+
+    current_url = effective_url
+    pages_crawled = 0
+    records_processed = 0
+    last_url = effective_url
+    next_url_to_store = request.url
+
+    while current_url:
+        payload = load_json_payload_from_url(current_url, timeout_seconds=request.timeout_seconds)
+        last_url = current_url
+        pages_crawled += 1
+        for raw in extract_json_records(payload):
+            normalized = normalize_json_record(raw)
+            records_processed += 1
+            if normalized is None:
+                result.rejected += 1
+            else:
+                store.upsert(_set_repository_on_publication(normalized, repository_id))
+                result.accepted += 1
+                last_invalidation_count = _maybe_invalidate_opds_cache_during_ingest(
+                    accepted_count=result.accepted,
+                    last_invalidation_count=last_invalidation_count,
+                    repository_id=repository_id,
+                )
+            if request.max_records and records_processed >= request.max_records:
+                break
+
+        next_url = _extract_opds_next_url(payload, current_url) if request.follow_next else None
+        if request.max_records and records_processed >= request.max_records:
+            next_url_to_store = next_url or request.url
+            break
+        if request.max_pages and pages_crawled >= request.max_pages:
+            next_url_to_store = next_url or request.url
+            break
+        if not request.follow_next or not next_url:
+            next_url_to_store = request.url
+            break
+        next_url_to_store = next_url
+        current_url = next_url
+
+    if request.incremental:
+        store.upsert_checkpoint(
+            checkpoint_key=checkpoint_key,
+            repository_id=repository_id,
+            source_type="opds-json",
+            base_url=request.url,
+            metadata_prefix="opds-json",
+            set_name=None,
+            last_from_date=None,
+            last_until_date=_today_ymd(),
+            state={
+                "next_url": next_url_to_store,
+                "last_url": last_url,
+                "pages_crawled": pages_crawled,
+                "records_processed": records_processed,
+            },
+        )
+
+    return result, {
+        "checkpoint_key": checkpoint_key,
+        "effective_url": effective_url,
+        "pages_crawled": pages_crawled,
+        "records_processed": records_processed,
+    }
 
 
 def _set_job_state(job_id: str, **updates) -> None:
@@ -767,6 +877,57 @@ def ingest_json_url_for_repository(repository_id: str, request: JsonUrlIngestReq
         "accepted": result.accepted,
         "rejected": result.rejected,
         "total_indexed": store.count(repository_id=repository_id),
+    }
+
+
+@app.post("/ingest/opds-json")
+def ingest_opds_json(request: OpdsJsonIngestRequest) -> dict:
+    checkpoint_key = request.checkpoint_key or _opds_json_checkpoint_key(DEFAULT_REPOSITORY_ID, request.url)
+    prior_checkpoint = store.get_checkpoint(checkpoint_key, repository_id=DEFAULT_REPOSITORY_ID) if request.incremental else None
+    try:
+        result, details = _ingest_opds_json(request, repository_id=DEFAULT_REPOSITORY_ID)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"OPDS JSON ingest failed: {exc}") from exc
+    _invalidate_opds_cache(DEFAULT_REPOSITORY_ID)
+    checkpoint = store.get_checkpoint(checkpoint_key, repository_id=DEFAULT_REPOSITORY_ID) if request.incremental else None
+    return {
+        "repository_id": DEFAULT_REPOSITORY_ID,
+        "source": "opds-json",
+        "accepted": result.accepted,
+        "rejected": result.rejected,
+        "pages_crawled": details["pages_crawled"],
+        "records_processed": details["records_processed"],
+        "effective_url": details["effective_url"],
+        "total_indexed": store.count(repository_id=DEFAULT_REPOSITORY_ID),
+        "incremental": request.incremental,
+        "checkpoint": checkpoint.__dict__ if checkpoint else None,
+        "previous_checkpoint": prior_checkpoint.__dict__ if prior_checkpoint else None,
+    }
+
+
+@app.post("/repositories/{repository_id}/ingest/opds-json")
+def ingest_opds_json_for_repository(repository_id: str, request: OpdsJsonIngestRequest) -> dict:
+    _get_repository_or_404(repository_id)
+    checkpoint_key = request.checkpoint_key or _opds_json_checkpoint_key(repository_id, request.url)
+    prior_checkpoint = store.get_checkpoint(checkpoint_key, repository_id=repository_id) if request.incremental else None
+    try:
+        result, details = _ingest_opds_json(request, repository_id=repository_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"OPDS JSON ingest failed: {exc}") from exc
+    _invalidate_opds_cache(repository_id)
+    checkpoint = store.get_checkpoint(checkpoint_key, repository_id=repository_id) if request.incremental else None
+    return {
+        "repository_id": repository_id,
+        "source": "opds-json",
+        "accepted": result.accepted,
+        "rejected": result.rejected,
+        "pages_crawled": details["pages_crawled"],
+        "records_processed": details["records_processed"],
+        "effective_url": details["effective_url"],
+        "total_indexed": store.count(repository_id=repository_id),
+        "incremental": request.incremental,
+        "checkpoint": checkpoint.__dict__ if checkpoint else None,
+        "previous_checkpoint": prior_checkpoint.__dict__ if prior_checkpoint else None,
     }
 
 

@@ -12,6 +12,7 @@ Small service that ingests OAPEN metadata (JSON or OAI-PMH Dublin Core) and expo
 
 - Ingest from JSON file (`POST /ingest/json`)
 - Ingest from JSON URL (`POST /ingest/json-url`)
+- Harvest paginated OPDS-like JSON feeds with checkpointed `next` links (`POST /ingest/opds-json`)
 - Async ingest jobs for JSON URLs (`POST /ingest/json-url/jobs`, `GET /ingest/jobs/{job_id}`)
 - Ingest from OAI-PMH endpoint with checkpointed incremental windows (`POST /ingest/oai-pmh`)
 - Multi-repository support with repository-scoped ingest/feed endpoints (`/repositories/{repository_id}/...`)
@@ -100,6 +101,20 @@ curl -X POST http://127.0.0.1:8000/ingest/json-url \
 
 Note: `json-url` ingestion streams records to reduce memory usage for large feeds.
 
+Harvest an OPDS-like JSON feed and follow `next` links:
+
+```bash
+curl -X POST http://127.0.0.1:8000/ingest/opds-json \
+  -H "content-type: application/json" \
+  -d '{
+    "url":"https://example.org/catalog.json",
+    "max_pages":5,
+    "max_records":250,
+    "follow_next":true,
+    "incremental":true
+  }'
+```
+
 Run URL ingest as a background job (non-blocking):
 
 ```bash
@@ -186,7 +201,7 @@ View persisted incremental checkpoints:
 curl "http://127.0.0.1:8000/harvest/checkpoints"
 ```
 
-Run incremental harvest immediately for all saved checkpoints:
+Run incremental harvest immediately for all saved checkpoints (OAI-PMH and OPDS-like JSON):
 
 ```bash
 curl -X POST http://127.0.0.1:8000/harvest/run \

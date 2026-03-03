@@ -18,6 +18,18 @@ def _extract_records(payload: Any) -> list[dict[str, Any]]:
             value = payload.get(key)
             if isinstance(value, list):
                 return [item for item in value if isinstance(item, dict)]
+        groups = payload.get("groups")
+        if isinstance(groups, list):
+            group_records: list[dict[str, Any]] = []
+            for group in groups:
+                if not isinstance(group, dict):
+                    continue
+                for key in ("publications", "items"):
+                    value = group.get(key)
+                    if isinstance(value, list):
+                        group_records.extend(item for item in value if isinstance(item, dict))
+            if group_records:
+                return group_records
     return []
 
 
@@ -60,6 +72,16 @@ def iter_json_records_from_url(url: str, timeout_seconds: int = 120) -> Iterator
     payload = response.json()
     for record in _extract_records(payload):
         yield record
+
+
+def load_json_payload_from_url(url: str, timeout_seconds: int = 120) -> Any:
+    response = requests.get(url, timeout=timeout_seconds)
+    response.raise_for_status()
+    return response.json()
+
+
+def extract_json_records(payload: Any) -> list[dict[str, Any]]:
+    return _extract_records(payload)
 
 
 def load_oai_dc_records(

@@ -164,6 +164,79 @@ def test_manual_harvest_run_endpoint(monkeypatch) -> None:
     assert payload["max_records"] == 20
 
 
+def test_manual_harvest_run_advances_opds_json_checkpoint(monkeypatch) -> None:
+    _reset_store()
+    create_repo = client.put(
+        "/repositories/opds-remote",
+        json={
+            "source_type": "opds-json",
+            "name": "Remote OPDS",
+            "config": {},
+            "is_active": True,
+        },
+    )
+    assert create_repo.status_code == 200
+
+    store.upsert_checkpoint(
+        checkpoint_key="opds-json|opds-remote|https://example.org/feed.json",
+        repository_id="opds-remote",
+        source_type="opds-json",
+        base_url="https://example.org/feed.json",
+        metadata_prefix="opds-json",
+        set_name=None,
+        last_from_date=None,
+        last_until_date=None,
+        state={"next_url": "https://example.org/feed.json"},
+    )
+
+    payloads = {
+        "https://example.org/feed.json": {
+            "publications": [
+                {
+                    "metadata": {
+                        "identifier": "scheduled-1",
+                        "title": "Scheduled Remote One",
+                        "author": [{"name": "Remote Author"}],
+                        "publisher": {"name": "Remote Press"},
+                    },
+                    "links": [{"href": "https://cdn.example.org/scheduled-1.epub", "rel": "http://opds-spec.org/acquisition"}],
+                }
+            ],
+            "links": [{"rel": "next", "href": "https://example.org/feed-2.json"}],
+        },
+        "https://example.org/feed-2.json": {
+            "publications": [
+                {
+                    "metadata": {
+                        "identifier": "scheduled-2",
+                        "title": "Scheduled Remote Two",
+                        "author": [{"name": "Remote Author Two"}],
+                    }
+                }
+            ],
+            "links": [],
+        },
+    }
+
+    monkeypatch.setattr("app.harvest.load_json_payload_from_url", lambda url: payloads[url])
+
+    response = client.post("/harvest/run", json={"max_records": 1})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["checkpoints_total"] == 1
+    assert payload["max_records"] == 1
+    assert payload["results"][0]["source_type"] == "opds-json"
+    assert payload["results"][0]["accepted"] == 1
+
+    checkpoint = store.get_checkpoint("opds-json|opds-remote|https://example.org/feed.json", repository_id="opds-remote")
+    assert checkpoint is not None
+    assert checkpoint.state["next_url"] == "https://example.org/feed-2.json"
+
+    repo_feed = client.get("/repositories/opds-remote/opds?page=1&page_size=10")
+    assert repo_feed.status_code == 200
+    assert repo_feed.json()["metadata"]["numberOfItems"] == 1
+
+
 def test_collection_and_language_subfeeds() -> None:
     _reset_store()
     sample_path = Path(__file__).parent / "data" / "sample_oapen.json"
@@ -560,6 +633,118 @@ def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:
     entries = index.json()["navigation"]
     assert any(item["properties"]["repositoryId"] == "default" for item in entries)
     assert any(item["properties"]["repositoryId"] == "demo-repo" for item in entries)
+
+
+def test_repository_opds_json_ingest_follows_next_and_reuses_feed_features(monkeypatch) -> None:
+    _reset_store()
+    create_repo = client.put(
+        "/repositories/opds-remote",
+        json={
+            "source_type": "opds-json",
+            "name": "Remote OPDS",
+            "config": {},
+            "is_active": True,
+        },
+    )
+    assert create_repo.status_code == 200
+
+    payloads = {
+        "https://example.org/feed.json": {
+            "metadata": {"title": "Remote Feed"},
+            "publications": [
+                {
+                    "metadata": {
+                        "identifier": "remote-1",
+                        "title": "Remote One",
+                        "author": [{"name": "Ada Author"}],
+                        "language": "eng",
+                        "publisher": {"name": "Remote Press"},
+                        "subject": [{"name": "Science"}],
+                        "belongsTo": {
+                            "collection": {"name": "Remote Collection"},
+                            "series": {"name": "Remote Series", "position": 2},
+                        },
+                    },
+                    "links": [
+                        {
+                            "href": "https://cdn.example.org/remote-1.epub",
+                            "rel": "http://opds-spec.org/acquisition",
+                            "type": "application/epub+zip",
+                        }
+                    ],
+                }
+            ],
+            "links": [{"rel": "next", "href": "https://example.org/feed-2.json"}],
+        },
+        "https://example.org/feed-2.json": {
+            "groups": [
+                {
+                    "metadata": {"title": "Recent"},
+                    "publications": [
+                        {
+                            "metadata": {
+                                "identifier": "remote-2",
+                                "title": "Remote Two",
+                                "author": [{"name": "Bea Writer"}],
+                                "language": "en",
+                                "publisher": {"name": "Remote Press"},
+                                "subject": ["Mathematics"],
+                            },
+                            "links": [
+                                {
+                                    "href": "https://cdn.example.org/remote-2.pdf",
+                                    "rel": "http://opds-spec.org/acquisition/open-access",
+                                    "type": "application/pdf",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+            "links": [],
+        },
+    }
+
+    def fake_loader(url: str, timeout_seconds: int = 120):
+        assert timeout_seconds == 30
+        return payloads[url]
+
+    monkeypatch.setattr(main_module, "load_json_payload_from_url", fake_loader)
+
+    ingest = client.post(
+        "/repositories/opds-remote/ingest/opds-json",
+        json={
+            "url": "https://example.org/feed.json",
+            "max_pages": 3,
+            "follow_next": True,
+            "timeout_seconds": 30,
+        },
+    )
+    assert ingest.status_code == 200
+    payload = ingest.json()
+    assert payload["accepted"] == 2
+    assert payload["rejected"] == 0
+    assert payload["pages_crawled"] == 2
+    assert payload["records_processed"] == 2
+    assert payload["total_indexed"] == 2
+    assert payload["checkpoint"]["state"]["next_url"] == "https://example.org/feed.json"
+
+    feed = client.get("/repositories/opds-remote/opds?page=1&page_size=10")
+    assert feed.status_code == 200
+    feed_json = feed.json()
+    assert feed_json["metadata"]["numberOfItems"] == 2
+    assert feed_json["metadata"]["repositoryId"] == "opds-remote"
+    assert "facets" in feed_json
+    assert "navigation" in feed_json
+    assert any(link["rel"] == "search" for link in feed_json["links"])
+
+    first_pub = client.get("/repositories/opds-remote/publications/remote-1")
+    assert first_pub.status_code == 200
+    pub_json = first_pub.json()
+    assert pub_json["metadata"]["author"][0]["name"] == "Ada Author"
+    assert pub_json["metadata"]["belongsTo"]["series"]["name"] == "Remote Series"
+    assert pub_json["metadata"]["belongsTo"]["collection"]["name"] == "Remote Collection"
+    assert pub_json["metadata"]["publisher"]["name"] == "Remote Press"
 
 
 def test_delete_repository_removes_data_and_config() -> None:
