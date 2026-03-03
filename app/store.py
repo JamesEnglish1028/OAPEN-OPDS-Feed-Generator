@@ -162,6 +162,15 @@ class PublicationStore:
             rows = session.scalars(statement).all()
             return [self._to_repository(row) for row in rows]
 
+    def delete_repository(self, repository_id: str) -> bool:
+        with self._session() as session:
+            row = session.get(RepositoryRow, repository_id)
+            if row is None:
+                return False
+            session.delete(row)
+            session.commit()
+            return True
+
     def upsert(self, pub: NormalizedPublication) -> None:
         repository_id = pub.repository_id or "default"
         source_publication_id = pub.source_publication_id or pub.publication_id

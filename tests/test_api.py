@@ -560,3 +560,41 @@ def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:
     entries = index.json()["navigation"]
     assert any(item["properties"]["repositoryId"] == "default" for item in entries)
     assert any(item["properties"]["repositoryId"] == "demo-repo" for item in entries)
+
+
+def test_delete_repository_removes_data_and_config() -> None:
+    _reset_store()
+    create_repo = client.put(
+        "/repositories/demo-repo",
+        json={
+            "source_type": "json",
+            "name": "Demo Repository",
+            "config": {},
+            "is_active": True,
+        },
+    )
+    assert create_repo.status_code == 200
+
+    sample_path = Path(__file__).parent / "data" / "sample_oapen.json"
+    ingest_repo = client.post("/repositories/demo-repo/ingest/json", json={"path": str(sample_path)})
+    assert ingest_repo.status_code == 200
+    assert ingest_repo.json()["accepted"] == 3
+
+    deleted = client.delete("/repositories/demo-repo")
+    assert deleted.status_code == 200
+    payload = deleted.json()
+    assert payload["deleted"] is True
+    assert payload["repository_id"] == "demo-repo"
+    assert payload["removed_publications"] == 3
+
+    missing_repo = client.get("/repositories/demo-repo")
+    assert missing_repo.status_code == 404
+
+    repo_feed = client.get("/repositories/demo-repo/opds?page=1&page_size=10")
+    assert repo_feed.status_code == 404
+
+
+def test_default_repository_cannot_be_deleted() -> None:
+    _reset_store()
+    response = client.delete("/repositories/default")
+    assert response.status_code == 400

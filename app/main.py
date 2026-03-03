@@ -680,6 +680,26 @@ def get_repository(repository_id: str) -> dict:
     return {"repository": repository.__dict__}
 
 
+@app.delete("/repositories/{repository_id}")
+def delete_repository(repository_id: str) -> dict:
+    if repository_id == DEFAULT_REPOSITORY_ID:
+        raise HTTPException(status_code=400, detail="Default repository cannot be deleted")
+    repository = _get_repository_or_404(repository_id)
+    removed_publications = store.count(repository_id=repository_id)
+    removed_checkpoints = len(store.list_checkpoints(repository_id=repository_id))
+    store.clear(repository_id=repository_id)
+    store.clear_checkpoints(repository_id=repository_id)
+    store.delete_repository(repository_id=repository_id)
+    _invalidate_opds_cache(repository_id)
+    return {
+        "deleted": True,
+        "repository_id": repository_id,
+        "repository_name": repository.name,
+        "removed_publications": removed_publications,
+        "removed_checkpoints": removed_checkpoints,
+    }
+
+
 @app.post("/ingest/json")
 def ingest_json(request: JsonIngestRequest) -> dict:
     try:
