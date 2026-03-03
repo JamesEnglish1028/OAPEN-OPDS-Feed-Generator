@@ -948,6 +948,22 @@ def admin_ui() -> str:
       background: rgba(47, 111, 98, 0.14);
       color: var(--accent-2);
     }
+    .repo-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-top: 8px;
+    }
+    .repo-actions a {
+      color: var(--accent-2);
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .repo-actions button {
+      padding: 7px 11px;
+      font-size: 12px;
+    }
     .summary {
       margin: 0 0 10px;
       color: var(--muted);
@@ -1022,7 +1038,6 @@ def admin_ui() -> str:
           <label class="check"><input id="repo-active" type="checkbox" checked> Active repository</label>
           <div class="actions">
             <button type="submit">Save Repository</button>
-            <button type="button" class="ghost" id="delete-repo">Delete Repository</button>
             <button type="button" class="ghost" id="refresh-repos">Refresh List</button>
           </div>
         </form>
@@ -1137,9 +1152,33 @@ def admin_ui() -> str:
           "<strong>" + repo.name + "</strong>",
           "<code>" + repo.repository_id + "</code>",
           "<small>" + metaBits.join(" | ") + "</small>",
-          '<div class="pill-row">' + pills.join("") + "</div>",
-          '<small><a href="' + repo.feedHref + '" target="_blank" rel="noopener noreferrer">Open feed</a></small>'
+          '<div class="pill-row">' + pills.join("") + "</div>"
         ].join("");
+
+        const actions = document.createElement("div");
+        actions.className = "repo-actions";
+
+        const openLink = document.createElement("a");
+        openLink.href = repo.feedHref;
+        openLink.target = "_blank";
+        openLink.rel = "noopener noreferrer";
+        openLink.textContent = "Open feed";
+        openLink.addEventListener("click", (event) => event.stopPropagation());
+        actions.appendChild(openLink);
+
+        if (!repo.isDefaultRepository) {
+          const deleteButton = document.createElement("button");
+          deleteButton.type = "button";
+          deleteButton.className = "ghost";
+          deleteButton.textContent = "Delete";
+          deleteButton.addEventListener("click", (event) => {
+            event.stopPropagation();
+            deleteRepository(repo.repository_id).catch((error) => show({ error: String(error) }));
+          });
+          actions.appendChild(deleteButton);
+        }
+
+        card.appendChild(actions);
         card.addEventListener("click", () => populateRepository(repo));
         repoList.appendChild(card);
       }
@@ -1186,8 +1225,8 @@ def admin_ui() -> str:
       }
     }
 
-    async function deleteRepository() {
-      const repositoryId = document.getElementById("repo-id").value.trim();
+    async function deleteRepository(explicitRepositoryId) {
+      const repositoryId = (explicitRepositoryId || document.getElementById("repo-id").value).trim();
       if (!repositoryId) {
         show({ error: "Select or enter a repository first." });
         return;
@@ -1244,9 +1283,6 @@ def admin_ui() -> str:
     }
 
     document.getElementById("repo-form").addEventListener("submit", saveRepository);
-    document.getElementById("delete-repo").addEventListener("click", () => {
-      deleteRepository().catch((error) => show({ error: String(error) }));
-    });
     document.getElementById("harvest-form").addEventListener("submit", runHarvest);
     document.getElementById("refresh-repos").addEventListener("click", loadRepositories);
     document.getElementById("load-checkpoints").addEventListener("click", loadCheckpoints);
