@@ -415,6 +415,17 @@ class PublicationStore:
             rows = session.execute(statement).all()
             return [{"slug": slug, "name": name, "count": count} for slug, name, count in rows if slug and name]
 
+    def list_series_counts(self, repository_id: str = "default") -> list[dict[str, str | int]]:
+        with self._session() as session:
+            statement = (
+                select(PublicationRow.series_slug, PublicationRow.series_name, sqla_func.count(PublicationRow.publication_id))
+                .where(PublicationRow.repository_id == repository_id, PublicationRow.series_slug.is_not(None))
+                .group_by(PublicationRow.series_slug, PublicationRow.series_name)
+                .order_by(PublicationRow.series_name.asc())
+            )
+            rows = session.execute(statement).all()
+            return [{"slug": slug, "name": name, "count": count} for slug, name, count in rows if slug and name]
+
     def list_language_counts(self, repository_id: str = "default") -> list[dict[str, str | int]]:
         with self._session() as session:
             statement = (

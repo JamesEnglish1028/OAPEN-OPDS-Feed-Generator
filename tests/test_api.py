@@ -42,6 +42,7 @@ def test_ingest_json_and_opds_pagination() -> None:
     assert "navigation" in page_1_json
     assert "facets" in page_1_json
     assert page_1_json["facets"][0]["metadata"]["title"] == "Language"
+    assert any(facet["metadata"]["title"] == "Browse" for facet in page_1_json["facets"])
     assert page_1_json["navigation"][0]["href"].endswith("/opds/years/2026")
     assert page_1_json["navigation"][0]["title"] == "Publication Year: 2026"
     assert any(
@@ -78,7 +79,8 @@ def test_get_single_publication() -> None:
     assert enriched_payload["metadata"]["belongsTo"]["series"]["name"] == "Demo Series"
     assert enriched_payload["metadata"]["belongsTo"]["series"]["position"] == 12
     assert enriched_payload["metadata"]["belongsTo"]["series"]["links"][0]["href"].endswith("/opds/series/demo-series")
-    assert enriched_payload["metadata"]["belongsTo"]["collection"] == "SciFi Classics"
+    assert enriched_payload["metadata"]["belongsTo"]["collection"]["name"] == "SciFi Classics"
+    assert enriched_payload["metadata"]["belongsTo"]["collection"]["links"][0]["href"].endswith("/opds/collections/scifi-classics")
     assert enriched_payload["metadata"]["publisher"]["links"][0]["href"].endswith("/opds/publishers/oapen-press")
     assert all(value is not None for value in enriched_payload["metadata"]["belongsTo"]["series"].values())
     assert enriched_payload["metadata"]["altIdentifier"][0] == "https://doi.org/10.1234/example-doi"
@@ -175,6 +177,7 @@ def test_collection_and_language_subfeeds() -> None:
     assert language_json["metadata"]["numberOfItems"] == 3
     assert "facets" in language_json
     assert language_json["facets"][0]["metadata"]["title"] == "Language"
+    assert any(facet["metadata"]["title"] == "Browse" for facet in language_json["facets"])
     assert any(link["rel"] == "start" for link in language_json["links"])
     assert any(link["rel"] == "up" for link in language_json["links"])
 
@@ -186,6 +189,7 @@ def test_collection_and_language_subfeeds() -> None:
     assert "facets" in year_json
     assert year_json["facets"][0]["metadata"]["title"] == "Language"
     assert len(year_json["facets"][0]["links"]) >= 1
+    assert any(facet["metadata"]["title"] == "Browse" for facet in year_json["facets"])
     assert any(link["rel"] == "start" for link in year_json["links"])
     assert any(link["rel"] == "up" for link in year_json["links"])
 
@@ -515,7 +519,7 @@ def test_publication_metadata_type_maps_chapter_records(tmp_path) -> None:
     assert publication.status_code == 200
     payload = publication.json()
     assert payload["metadata"]["@type"] == "http://schema.org/Chapter"
-    assert payload["metadata"]["belongsTo"]["collection"] == "Proceedings of Test Series"
+    assert payload["metadata"]["belongsTo"]["collection"]["name"] == "Proceedings of Test Series"
     assert payload["metadata"]["belongsTo"]["series"]["name"] == "Proceedings of Test Series"
     assert payload["metadata"]["belongsTo"]["series"]["identifier"] == "1345"
 

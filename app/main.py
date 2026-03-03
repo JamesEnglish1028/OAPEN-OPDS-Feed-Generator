@@ -453,7 +453,20 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
     if series_entry:
         belongs_to_obj["series"] = series_entry
     if collection_value:
-        belongs_to_obj["collection"] = collection_value
+        collection_object: dict[str, object] = {"name": collection_value}
+        collection_slug = pub.collection_slug
+        if collection_slug:
+            if repository_id and repository_id != DEFAULT_REPOSITORY_ID:
+                collection_href = f"/repositories/{repository_id}/opds/collections/{collection_slug}"
+            else:
+                collection_href = f"/opds/collections/{collection_slug}"
+            collection_object["links"] = [
+                {
+                    "href": f"{base_url}{collection_href}" if base_url else collection_href,
+                    "type": "application/opds+json",
+                }
+            ]
+        belongs_to_obj["collection"] = collection_object
     if belongs_to_obj:
         metadata["belongsTo"] = belongs_to_obj
     if alt_identifiers:
@@ -564,6 +577,7 @@ def _attach_language_facets(request: Request, response: dict, language_counts: l
                 "type": "application/opds+json",
             }
         )
+    existing_facets = response.get("facets", [])
     response["facets"] = [
         {
             "metadata": {"title": "Language"},
@@ -576,7 +590,48 @@ def _attach_language_facets(request: Request, response: dict, language_counts: l
                 }
                 for item in language_counts
             ],
+        },
+        *existing_facets,
+    ]
+    return response
+
+
+def _attach_browse_facets(request: Request, response: dict, repository_id: str) -> dict:
+    if repository_id == DEFAULT_REPOSITORY_ID:
+        collection_prefix = "/opds/collections"
+        series_prefix = "/opds/series"
+    else:
+        collection_prefix = f"/repositories/{repository_id}/opds/collections"
+        series_prefix = f"/repositories/{repository_id}/opds/series"
+
+    collection_links = [
+        {
+            "href": _build_url(request, f"{collection_prefix}/{item['slug']}", {}),
+            "type": "application/opds+json",
+            "title": f"Collection: {item['name']}",
+            "properties": {"numberOfItems": int(item["count"])},
         }
+        for item in store.list_collection_counts(repository_id=repository_id)
+    ]
+    series_links = [
+        {
+            "href": _build_url(request, f"{series_prefix}/{item['slug']}", {}),
+            "type": "application/opds+json",
+            "title": f"Series: {item['name']}",
+            "properties": {"numberOfItems": int(item["count"])},
+        }
+        for item in store.list_series_counts(repository_id=repository_id)
+    ]
+    browse_links = [*collection_links, *series_links]
+    if not browse_links:
+        return response
+    existing_facets = response.get("facets", [])
+    response["facets"] = [
+        *existing_facets,
+        {
+            "metadata": {"title": "Browse"},
+            "links": browse_links,
+        },
     ]
     return response
 
@@ -926,7 +981,8 @@ def _opds_feed_for_repository(
             }
             for item in year_counts
         ]
-        return _attach_language_facets(request=request, response=response, language_counts=languages, repository_id=repository_id)
+        response = _attach_language_facets(request=request, response=response, language_counts=languages, repository_id=repository_id)
+        return _attach_browse_facets(request=request, response=response, repository_id=repository_id)
 
     return _cached_opds_response(request, build_response, repository_id=repository_id)
 
@@ -1206,12 +1262,13 @@ def opds_year_feed(
             repository_id=DEFAULT_REPOSITORY_ID,
         )
         language_counts = store.list_language_counts_by_publication_year(year=year, repository_id=DEFAULT_REPOSITORY_ID)
-        return _attach_language_facets(
+        response = _attach_language_facets(
             request=request,
             response=response,
             language_counts=language_counts,
             repository_id=DEFAULT_REPOSITORY_ID,
         )
+        return _attach_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID)
 
     return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
 
@@ -1239,12 +1296,13 @@ def opds_year_feed_repository(
             repository_id=repository_id,
         )
         language_counts = store.list_language_counts_by_publication_year(year=year, repository_id=repository_id)
-        return _attach_language_facets(
+        response = _attach_language_facets(
             request=request,
             response=response,
             language_counts=language_counts,
             repository_id=repository_id,
         )
+        return _attach_browse_facets(request=request, response=response, repository_id=repository_id)
 
     return _cached_opds_response(request, build_response, repository_id=repository_id)
 
@@ -1277,12 +1335,13 @@ def opds_language_feed(
             subset=subset,
             repository_id=DEFAULT_REPOSITORY_ID,
         )
-        return _attach_language_facets(
+        response = _attach_language_facets(
             request=request,
             response=response,
             language_counts=store.list_language_counts(repository_id=DEFAULT_REPOSITORY_ID),
             repository_id=DEFAULT_REPOSITORY_ID,
         )
+        return _attach_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID)
 
     return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
 
@@ -1317,12 +1376,13 @@ def opds_language_feed_repository(
             subset=subset,
             repository_id=repository_id,
         )
-        return _attach_language_facets(
+        response = _attach_language_facets(
             request=request,
             response=response,
             language_counts=store.list_language_counts(repository_id=repository_id),
             repository_id=repository_id,
         )
+        return _attach_browse_facets(request=request, response=response, repository_id=repository_id)
 
     return _cached_opds_response(request, build_response, repository_id=repository_id)
 
