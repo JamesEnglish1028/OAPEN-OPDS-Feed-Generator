@@ -1114,7 +1114,11 @@ def admin_ui() -> str:
       if (!trimmed) {
         return {};
       }
-      return JSON.parse(trimmed);
+      try {
+        return JSON.parse(trimmed);
+      } catch (error) {
+        throw new Error("Config JSON is invalid: " + error.message);
+      }
     }
 
     function renderRepositories(payload) {
@@ -1138,8 +1142,8 @@ def admin_ui() -> str:
         const metaBits = [
           "source_type: " + repo.source_type,
           "source: " + (repo.sourceDomain || "n/a"),
-          "items: " + (repo.publicationCount ?? 0),
-          "checkpoints: " + (repo.checkpointCount ?? 0)
+          "items: " + (repo.publicationCount != null ? repo.publicationCount : 0),
+          "checkpoints: " + (repo.checkpointCount != null ? repo.checkpointCount : 0)
         ];
         const pills = [];
         if (repo.isDefaultRepository) {
@@ -1282,10 +1286,18 @@ def admin_ui() -> str:
       show(data);
     }
 
-    document.getElementById("repo-form").addEventListener("submit", saveRepository);
-    document.getElementById("harvest-form").addEventListener("submit", runHarvest);
-    document.getElementById("refresh-repos").addEventListener("click", loadRepositories);
-    document.getElementById("load-checkpoints").addEventListener("click", loadCheckpoints);
+    document.getElementById("repo-form").addEventListener("submit", (event) => {
+      saveRepository(event).catch((error) => show({ error: String(error) }));
+    });
+    document.getElementById("harvest-form").addEventListener("submit", (event) => {
+      runHarvest(event).catch((error) => show({ error: String(error) }));
+    });
+    document.getElementById("refresh-repos").addEventListener("click", () => {
+      loadRepositories().catch((error) => show({ error: String(error) }));
+    });
+    document.getElementById("load-checkpoints").addEventListener("click", () => {
+      loadCheckpoints().catch((error) => show({ error: String(error) }));
+    });
     loadRepositories().catch((error) => show({ error: String(error) }));
   </script>
 </body>
