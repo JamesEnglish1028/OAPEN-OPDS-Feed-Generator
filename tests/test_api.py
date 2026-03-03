@@ -646,8 +646,10 @@ def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:
     repo_entries = {item["repository_id"]: item for item in repositories.json()["repositories"]}
     assert repo_entries["default"]["isDefaultRepository"] is True
     assert repo_entries["default"]["publicationCount"] == 0
+    assert repo_entries["default"]["sourceDomain"] == "oapen.org"
     assert repo_entries["demo-repo"]["isDefaultRepository"] is False
     assert repo_entries["demo-repo"]["publicationCount"] == 3
+    assert repo_entries["demo-repo"]["sourceDomain"] is None
     assert repo_entries["demo-repo"]["feedHref"].endswith("/repositories/demo-repo/opds")
 
 

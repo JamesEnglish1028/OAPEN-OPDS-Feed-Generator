@@ -4,7 +4,7 @@ import os
 import threading
 import uuid
 from datetime import UTC, datetime
-from urllib.parse import urlencode, urljoin
+from urllib.parse import urlencode, urljoin, urlparse
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -734,6 +734,27 @@ def _get_repository_or_404(repository_id: str) -> RepositoryConfig:
     return repository
 
 
+def _repository_source_domain(repository: RepositoryConfig, checkpoints) -> str | None:
+    config = repository.config if isinstance(repository.config, dict) else {}
+    candidate_url = None
+    for key in ("url", "base_url", "feed_url", "endpoint"):
+        value = config.get(key)
+        if isinstance(value, str) and value.strip():
+            candidate_url = value.strip()
+            break
+    if candidate_url is None and checkpoints:
+        latest = checkpoints[0]
+        if isinstance(latest.base_url, str) and latest.base_url.strip():
+            candidate_url = latest.base_url.strip()
+    if candidate_url:
+        parsed = urlparse(candidate_url)
+        if parsed.netloc:
+            return parsed.netloc
+    if repository.repository_id == DEFAULT_REPOSITORY_ID:
+        return "oapen.org"
+    return None
+
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin_ui() -> str:
     return """<!doctype html>
@@ -1100,6 +1121,7 @@ def admin_ui() -> str:
         card.className = "repo";
         const metaBits = [
           "source_type: " + repo.source_type,
+          "source: " + (repo.sourceDomain || "n/a"),
           "items: " + (repo.publicationCount ?? 0),
           "checkpoints: " + (repo.checkpointCount ?? 0)
         ];
@@ -1238,12 +1260,14 @@ def list_repositories(request: Request, include_inactive: bool = Query(default=T
     base = str(request.base_url).rstrip("/")
     repositories = []
     for item in store.list_repositories(include_inactive=include_inactive):
+        checkpoints = store.list_checkpoints(repository_id=item.repository_id)
         repositories.append(
             {
                 **item.__dict__,
                 "isDefaultRepository": item.repository_id == DEFAULT_REPOSITORY_ID,
                 "publicationCount": store.count(repository_id=item.repository_id),
-                "checkpointCount": len(store.list_checkpoints(repository_id=item.repository_id)),
+                "checkpointCount": len(checkpoints),
+                "sourceDomain": _repository_source_domain(item, checkpoints),
                 "feedHref": (
                     f"{base}/opds"
                     if item.repository_id == DEFAULT_REPOSITORY_ID
