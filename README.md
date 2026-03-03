@@ -25,7 +25,7 @@ Small service that ingests OAPEN metadata (JSON or OAI-PMH Dublin Core) and expo
 - OPDS language facet compact collection (`facets`) with `numberOfItems`
 - `metadata.publisher.links` points to publisher-specific OPDS subfeeds
 - `metadata.belongsTo.collection` is mapped from funder as a string value
-- OPDS 2 search link and search endpoint (`/opds/search{?query,title,author,publisher,series,collection}`)
+- OPDS 2 search link and search endpoint (`/opds/search{?query,title,author,publisher,series,collection,subject}`)
 - Persistent storage with `DATABASE_URL` (SQLite default, PostgreSQL supported)
 - Harvest checkpoint visibility (`GET /harvest/checkpoints`)
 - Alembic migration/versioning for schema changes
@@ -202,6 +202,7 @@ Search feed:
 curl "http://127.0.0.1:8000/opds/search?query=education&page=1&page_size=25"
 curl "http://127.0.0.1:8000/opds/search?title=Open%20Access&author=Carol&page=1&page_size=25"
 curl "http://127.0.0.1:8000/opds/search?collection=SciFi%20Classics&page=1&page_size=25"
+curl "http://127.0.0.1:8000/opds/search?subject=Education&page=1&page_size=25"
 ```
 
 Validate current OPDS page against Palace profile:

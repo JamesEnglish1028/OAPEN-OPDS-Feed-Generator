@@ -48,6 +48,7 @@ def test_ingest_json_and_opds_pagination() -> None:
         link["rel"] == "search"
         and link.get("templated") is True
         and "collection" in link.get("href", "")
+        and "subject" in link.get("href", "")
         for link in page_1_json["links"]
     )
 
@@ -223,6 +224,10 @@ def test_opds_search_endpoint() -> None:
     collection_search = client.get("/opds/search?collection=SciFi%20Classics&page=1&page_size=10")
     assert collection_search.status_code == 200
     assert collection_search.json()["metadata"]["numberOfItems"] == 1
+
+    subject_search = client.get("/opds/search?subject=Education&page=1&page_size=10")
+    assert subject_search.status_code == 200
+    assert subject_search.json()["metadata"]["numberOfItems"] == 1
 
 
 def test_publisher_normalization_for_opds_metadata(tmp_path) -> None:

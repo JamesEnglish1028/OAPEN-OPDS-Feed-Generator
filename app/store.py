@@ -356,6 +356,7 @@ class PublicationStore:
         publisher: str | None = None,
         series: str | None = None,
         collection: str | None = None,
+        subject: str | None = None,
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[int, list[NormalizedPublication]]:
@@ -374,6 +375,7 @@ class PublicationStore:
                     like_filter(PublicationRow.publisher, keyword),
                     like_filter(PublicationRow.series_name, keyword),
                     like_filter(PublicationRow.collection, keyword),
+                    like_filter(PublicationRow.subjects_json, keyword),
                 )
             )
         if title and title.strip():
@@ -386,6 +388,8 @@ class PublicationStore:
             filters.append(like_filter(PublicationRow.series_name, series))
         if collection and collection.strip():
             filters.append(like_filter(PublicationRow.collection, collection))
+        if subject and subject.strip():
+            filters.append(like_filter(PublicationRow.subjects_json, subject))
 
         where_clause = and_(*filters)
         with self._session() as session:
