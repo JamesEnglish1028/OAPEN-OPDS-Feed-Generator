@@ -891,6 +891,7 @@ def admin_ui() -> str:
       border-radius: 14px;
       padding: 12px;
       background: rgba(255, 255, 255, 0.6);
+      cursor: pointer;
     }
     .repo strong, .repo code {
       display: block;
@@ -899,6 +900,38 @@ def admin_ui() -> str:
       display: block;
       margin-top: 6px;
       color: var(--muted);
+    }
+    .pill-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: rgba(31, 41, 51, 0.08);
+      color: var(--ink);
+    }
+    .pill.default {
+      background: rgba(162, 62, 42, 0.14);
+      color: var(--accent);
+    }
+    .pill.active {
+      background: rgba(47, 111, 98, 0.14);
+      color: var(--accent-2);
+    }
+    .summary {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
     }
     pre {
       margin: 0;
@@ -1010,6 +1043,7 @@ def admin_ui() -> str:
 
       <div class="card">
         <h2>Known Repositories</h2>
+        <p id="repo-summary" class="summary">Loading repositories...</p>
         <div id="repo-list" class="list"></div>
       </div>
 
@@ -1023,6 +1057,7 @@ def admin_ui() -> str:
   <script>
     const repoList = document.getElementById("repo-list");
     const repoSelect = document.getElementById("harvest-repo");
+    const repoSummary = document.getElementById("repo-summary");
     const output = document.getElementById("output");
 
     function show(data) {
@@ -1049,6 +1084,12 @@ def admin_ui() -> str:
       const repositories = payload.repositories || [];
       repoList.innerHTML = "";
       repoSelect.innerHTML = "";
+      const defaultRepo = repositories.find((repo) => repo.isDefaultRepository);
+      if (defaultRepo) {
+        repoSummary.textContent = "Default feed: " + defaultRepo.name + " (" + defaultRepo.repository_id + ").";
+      } else {
+        repoSummary.textContent = "No default repository is currently configured.";
+      }
       for (const repo of repositories) {
         const option = document.createElement("option");
         option.value = repo.repository_id;
@@ -1057,10 +1098,24 @@ def admin_ui() -> str:
 
         const card = document.createElement("div");
         card.className = "repo";
+        const metaBits = [
+          "source_type: " + repo.source_type,
+          "items: " + (repo.publicationCount ?? 0),
+          "checkpoints: " + (repo.checkpointCount ?? 0)
+        ];
+        const pills = [];
+        if (repo.isDefaultRepository) {
+          pills.push('<span class="pill default">Default Feed</span>');
+        }
+        if (repo.is_active) {
+          pills.push('<span class="pill active">Active</span>');
+        }
         card.innerHTML = [
           "<strong>" + repo.name + "</strong>",
           "<code>" + repo.repository_id + "</code>",
-          "<small>source_type: " + repo.source_type + " | active: " + repo.is_active + "</small>"
+          "<small>" + metaBits.join(" | ") + "</small>",
+          '<div class="pill-row">' + pills.join("") + "</div>",
+          '<small><a href="' + repo.feedHref + '" target="_blank" rel="noopener noreferrer">Open feed</a></small>'
         ].join("");
         card.addEventListener("click", () => populateRepository(repo));
         repoList.appendChild(card);
@@ -1179,8 +1234,23 @@ def shutdown() -> None:
 
 
 @app.get("/repositories")
-def list_repositories(include_inactive: bool = Query(default=True)) -> dict:
-    repositories = [item.__dict__ for item in store.list_repositories(include_inactive=include_inactive)]
+def list_repositories(request: Request, include_inactive: bool = Query(default=True)) -> dict:
+    base = str(request.base_url).rstrip("/")
+    repositories = []
+    for item in store.list_repositories(include_inactive=include_inactive):
+        repositories.append(
+            {
+                **item.__dict__,
+                "isDefaultRepository": item.repository_id == DEFAULT_REPOSITORY_ID,
+                "publicationCount": store.count(repository_id=item.repository_id),
+                "checkpointCount": len(store.list_checkpoints(repository_id=item.repository_id)),
+                "feedHref": (
+                    f"{base}/opds"
+                    if item.repository_id == DEFAULT_REPOSITORY_ID
+                    else f"{base}/repositories/{item.repository_id}/opds"
+                ),
+            }
+        )
     return {"count": len(repositories), "repositories": repositories}
 
 

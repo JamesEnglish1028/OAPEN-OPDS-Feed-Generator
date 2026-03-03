@@ -217,6 +217,12 @@ curl -X POST http://127.0.0.1:8000/harvest/run \
 pytest -q
 ```
 
+Or run the local pre-push check wrapper:
+
+```bash
+./scripts/check.sh
+```
+
 ## Incremental harvest behavior
 
 - If `incremental` is `true`, the service will reuse the previous checkpoint `last_until_date` as the next `from_date` when `from_date` is omitted.

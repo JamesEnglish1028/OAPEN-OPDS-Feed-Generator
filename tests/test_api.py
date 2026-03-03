@@ -641,6 +641,15 @@ def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:
     assert any(item["properties"]["repositoryId"] == "default" for item in entries)
     assert any(item["properties"]["repositoryId"] == "demo-repo" for item in entries)
 
+    repositories = client.get("/repositories")
+    assert repositories.status_code == 200
+    repo_entries = {item["repository_id"]: item for item in repositories.json()["repositories"]}
+    assert repo_entries["default"]["isDefaultRepository"] is True
+    assert repo_entries["default"]["publicationCount"] == 0
+    assert repo_entries["demo-repo"]["isDefaultRepository"] is False
+    assert repo_entries["demo-repo"]["publicationCount"] == 3
+    assert repo_entries["demo-repo"]["feedHref"].endswith("/repositories/demo-repo/opds")
+
 
 def test_repository_opds_json_ingest_follows_next_and_reuses_feed_features(monkeypatch) -> None:
     _reset_store()
