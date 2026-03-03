@@ -5,7 +5,14 @@ from pathlib import Path
 os.environ["DATABASE_URL"] = "sqlite:///./test_oapen_opds.db"
 os.environ["SCHEDULER_ENABLED"] = "false"
 
-from fastapi.testclient import TestClient
+import pytest
+
+try:
+    from fastapi.testclient import TestClient
+except (RuntimeError, ModuleNotFoundError) as exc:
+    if "httpx" in str(exc).lower():
+        pytest.skip("fastapi test client unavailable because httpx is not installed in this environment", allow_module_level=True)
+    raise
 
 import app.main as main_module
 from app.main import app, store
