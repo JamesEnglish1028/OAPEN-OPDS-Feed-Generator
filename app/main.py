@@ -622,7 +622,7 @@ def _build_feed_response(
             "@type": "http://schema.org/DataFeed",
             "title": title,
             "numberOfItems": total,
-            "itemsPerPage": page_size,
+            "itemsPerPage": len(publications),
             "currentPage": page,
             "repositoryId": repository_id,
             "repositoryName": repository_name,

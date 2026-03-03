@@ -42,6 +42,7 @@ def test_ingest_json_and_opds_pagination() -> None:
     assert feed_page_1.status_code == 200
     page_1_json = feed_page_1.json()
     assert page_1_json["metadata"]["numberOfItems"] == 3
+    assert page_1_json["metadata"]["itemsPerPage"] == 1
     assert len(page_1_json["publications"]) == 1
     rels = [link["rel"] for link in page_1_json["links"]]
     assert "next" in rels
@@ -62,6 +63,7 @@ def test_ingest_json_and_opds_pagination() -> None:
     feed_page_2 = client.get("/opds?page=2&page_size=1")
     assert feed_page_2.status_code == 200
     page_2_json = feed_page_2.json()
+    assert page_2_json["metadata"]["itemsPerPage"] == 1
     rels = [link["rel"] for link in page_2_json["links"]]
     assert "previous" in rels
 
