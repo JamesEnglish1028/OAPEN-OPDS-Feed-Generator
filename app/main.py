@@ -14,7 +14,6 @@ from app.db_migrations import run_migrations
 from app.harvest import run_incremental_for_all_checkpoints
 from app.scheduler import IncrementalHarvestScheduler
 from app.sources import iter_json_records, iter_json_records_from_url, load_oai_dc_records
-from app.springer import SpringerApiError, SpringerSource
 from app.store import IngestResult, PublicationStore, RepositoryConfig
 from app.transform import (
     first_valid_publisher,
@@ -32,8 +31,6 @@ DEFAULT_REPOSITORY_NAME = "Default OPDS Repository"
 app = FastAPI(title="OAPEN OPDS Feed Generator", version="0.2.0")
 store = PublicationStore(os.getenv("DATABASE_URL", "sqlite:///./oapen_opds.db"))
 opds_cache = OpdsCache()
-springer_base_url = os.getenv("SPRINGER_OPENACCESS_BASE_URL", "").strip() or "https://api.springernature.com/openaccess/json"
-springer_source = SpringerSource(base_url=springer_base_url)
 harvest_scheduler = IncrementalHarvestScheduler(
     store=store,
     hour_utc=int(os.getenv("SCHEDULER_DAILY_UTC_HOUR", "2")),
@@ -73,17 +70,6 @@ class RepositoryUpsertRequest(BaseModel):
     name: str
     config: dict = Field(default_factory=dict)
     is_active: bool = True
-
-
-class SpringerIngestRequest(BaseModel):
-    max_records: int | None = None
-    max_requests_per_run: int | None = None
-    reset_checkpoint: bool = False
-    clear_existing: bool = False
-    start_offset: int | None = None
-    books_only: bool = False
-    verify_link_types: bool = False
-    include_covers: bool = True
 
 
 def _as_list(value):
@@ -367,32 +353,9 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
             if base_url:
                 href = f"{base_url}{href}"
             series_entry["links"] = [{"href": href, "type": "application/opds+json"}]
-    springer_publication_name = None
-    if isinstance(raw.get("publicationName"), str) and raw.get("publicationName", "").strip():
-        springer_publication_name = raw.get("publicationName").strip()
-    elif isinstance(metadata_src.get("publicationName"), str) and metadata_src.get("publicationName", "").strip():
-        springer_publication_name = metadata_src.get("publicationName").strip()
-    springer_series_id_raw = raw.get("seriesId")
-    if springer_series_id_raw is None:
-        springer_series_id_raw = metadata_src.get("seriesId")
-    springer_series_id = None
-    if isinstance(springer_series_id_raw, str) and springer_series_id_raw.strip():
-        springer_series_id = springer_series_id_raw.strip()
-    elif isinstance(springer_series_id_raw, int):
-        springer_series_id = str(springer_series_id_raw)
-    if series_entry is None and schema_type == "http://schema.org/Chapter":
-        if springer_publication_name:
-            series_entry = {"name": springer_publication_name}
-        elif springer_series_id:
-            series_entry = {"identifier": springer_series_id}
-    if series_entry is not None and springer_series_id:
-        series_entry["identifier"] = springer_series_id
-
     collection_value = None
     if pub.collection:
         collection_value = pub.collection
-    elif schema_type == "http://schema.org/Chapter" and springer_publication_name:
-        collection_value = springer_publication_name
 
     accessibility = []
     for item in _as_list(metadata_src.get("accessibility")):
@@ -879,67 +842,6 @@ def ingest_oai_pmh_for_repository(repository_id: str, request: OaiIngestRequest)
         "incremental": request.incremental,
         "checkpoint": checkpoint.__dict__ if checkpoint else None,
         "previous_checkpoint": prior_checkpoint.__dict__ if prior_checkpoint else None,
-    }
-
-
-@app.post("/repositories/{repository_id}/ingest/springer")
-def ingest_springer_repository(repository_id: str, request: SpringerIngestRequest) -> dict:
-    repository = _get_repository_or_404(repository_id)
-    if repository.source_type != "springer-openaccess":
-        raise HTTPException(status_code=400, detail="Repository source_type must be springer-openaccess")
-    if request.clear_existing:
-        store.clear(repository_id=repository_id)
-    if request.reset_checkpoint:
-        store.clear_checkpoints(repository_id=repository_id)
-    try:
-        result = springer_source.ingest_repository(
-            store=store,
-            repository=repository,
-            max_records=request.max_records,
-            max_requests_per_run=request.max_requests_per_run,
-            start_offset=request.start_offset if request.start_offset is not None else (1 if request.reset_checkpoint else None),
-            books_only=request.books_only,
-            verify_link_types=request.verify_link_types,
-            include_covers=request.include_covers,
-        )
-    except SpringerApiError as exc:
-        detail_payload = {
-            "error": "springer_ingest_failed",
-            "message": str(exc),
-        }
-        if exc.url:
-            detail_payload["upstream_url"] = exc.url
-        if exc.retry_after:
-            detail_payload["retry_after"] = exc.retry_after
-        if exc.body_excerpt:
-            detail_payload["upstream_excerpt"] = exc.body_excerpt
-
-        if exc.status_code == 429:
-            detail_payload["error"] = "springer_rate_limited"
-            raise HTTPException(status_code=429, detail=detail_payload) from exc
-
-        if exc.status_code == 403 and exc.body_excerpt and "premium feature" in exc.body_excerpt.casefold():
-            detail_payload["error"] = "blocked_by_api_plan"
-            detail_payload["message"] = (
-                "Springer API access blocked by plan restriction for this request. "
-                "Contact supportapi@springernature.com."
-            )
-            raise HTTPException(status_code=403, detail=detail_payload) from exc
-
-        if exc.status_code:
-            raise HTTPException(status_code=exc.status_code, detail=detail_payload) from exc
-        raise HTTPException(status_code=400, detail=detail_payload) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Springer ingest failed: {exc}") from exc
-    _invalidate_opds_cache(repository_id)
-    checkpoint = store.get_checkpoint(f"springer::{repository_id}", repository_id=repository_id)
-    return {
-        "repository_id": repository_id,
-        "source": "springer-openaccess",
-        "accepted": result.accepted,
-        "rejected": result.rejected,
-        "total_indexed": store.count(repository_id=repository_id),
-        "checkpoint": checkpoint.__dict__ if checkpoint else None,
     }
 
 

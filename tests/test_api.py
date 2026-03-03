@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.main import app, store
-from app.store import IngestResult
 from app.store import PublicationStore
 
 
@@ -503,8 +502,6 @@ def test_publication_metadata_type_maps_chapter_records(tmp_path) -> None:
                         "doi": "10.1007/1345_2025_301",
                         "contentType": "Chapter",
                         "publicationType": "Book",
-                        "publicationName": "Proceedings of Test Series",
-                        "seriesId": "1345",
                     }
                 ]
             }
@@ -519,57 +516,23 @@ def test_publication_metadata_type_maps_chapter_records(tmp_path) -> None:
     assert publication.status_code == 200
     payload = publication.json()
     assert payload["metadata"]["@type"] == "http://schema.org/Chapter"
-    assert payload["metadata"]["belongsTo"]["collection"]["name"] == "Proceedings of Test Series"
-    assert payload["metadata"]["belongsTo"]["series"]["name"] == "Proceedings of Test Series"
-    assert payload["metadata"]["belongsTo"]["series"]["identifier"] == "1345"
-
-
-def test_chapter_records_with_only_series_id_still_include_belongsto(tmp_path) -> None:
-    _reset_store()
-    payload_path = tmp_path / "chapter_series_only_case.json"
-    payload_path.write_text(
-        json.dumps(
-            {
-                "publications": [
-                    {
-                        "id": "chapter-series-only",
-                        "title": "Chapter Series Only",
-                        "contentType": "Chapter",
-                        "publicationType": "Book",
-                        "publicationName": "",
-                        "seriesId": "1345",
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
-    assert ingest.status_code == 200
-
-    publication = client.get("/publications/chapter-series-only")
-    assert publication.status_code == 200
-    payload = publication.json()
-    assert payload["metadata"]["@type"] == "http://schema.org/Chapter"
-    assert payload["metadata"]["belongsTo"]["series"]["identifier"] == "1345"
 
 
 def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:
     _reset_store()
     create_repo = client.put(
-        "/repositories/springer-oa",
+        "/repositories/demo-repo",
         json={
-            "source_type": "springer-openaccess",
-            "name": "Springer OA",
-            "config": {"api_key": "test-key", "query": "type:Book"},
+            "source_type": "json",
+            "name": "Demo Repository",
+            "config": {},
             "is_active": True,
         },
     )
     assert create_repo.status_code == 200
 
     sample_path = Path(__file__).parent / "data" / "sample_oapen.json"
-    ingest_repo = client.post("/repositories/springer-oa/ingest/json", json={"path": str(sample_path)})
+    ingest_repo = client.post("/repositories/demo-repo/ingest/json", json={"path": str(sample_path)})
     assert ingest_repo.status_code == 200
     assert ingest_repo.json()["accepted"] == 3
 
@@ -577,10 +540,10 @@ def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:
     assert default_feed.status_code == 200
     assert default_feed.json()["metadata"]["numberOfItems"] == 0
 
-    repo_feed = client.get("/repositories/springer-oa/opds?page=1&page_size=10")
+    repo_feed = client.get("/repositories/demo-repo/opds?page=1&page_size=10")
     assert repo_feed.status_code == 200
     assert repo_feed.json()["metadata"]["numberOfItems"] == 3
-    assert repo_feed.json()["metadata"]["repositoryId"] == "springer-oa"
+    assert repo_feed.json()["metadata"]["repositoryId"] == "demo-repo"
     assert repo_feed.json()["metadata"]["isDefaultRepository"] is False
 
     default_alias = client.get("/opds/default?page=1&page_size=10")
@@ -588,72 +551,12 @@ def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:
     assert default_alias.json()["metadata"]["repositoryId"] == "default"
     assert default_alias.json()["metadata"]["isDefaultRepository"] is True
 
-    repo_alias = client.get("/opds/springer-oa?page=1&page_size=10")
+    repo_alias = client.get("/opds/demo-repo?page=1&page_size=10")
     assert repo_alias.status_code == 200
-    assert repo_alias.json()["metadata"]["repositoryId"] == "springer-oa"
+    assert repo_alias.json()["metadata"]["repositoryId"] == "demo-repo"
 
     index = client.get("/opds/index")
     assert index.status_code == 200
     entries = index.json()["navigation"]
     assert any(item["properties"]["repositoryId"] == "default" for item in entries)
-    assert any(item["properties"]["repositoryId"] == "springer-oa" for item in entries)
-
-
-def test_springer_ingest_endpoint_uses_adapter(monkeypatch) -> None:
-    _reset_store()
-    create_repo = client.put(
-        "/repositories/springer-oa",
-        json={
-            "source_type": "springer-openaccess",
-            "name": "Springer OA",
-            "config": {"api_key": "test-key", "query": "type:Book"},
-            "is_active": True,
-        },
-    )
-    assert create_repo.status_code == 200
-
-    captured = {"books_only": None, "verify_link_types": None, "include_covers": None, "max_requests_per_run": None}
-
-    def fake_ingest_repository(
-        store,
-        repository,
-        max_records,
-        max_requests_per_run=None,
-        start_offset=None,
-        books_only=False,
-        verify_link_types=False,
-        include_covers=True,
-    ):
-        assert repository.repository_id == "springer-oa"
-        captured["max_requests_per_run"] = max_requests_per_run
-        captured["books_only"] = books_only
-        captured["verify_link_types"] = verify_link_types
-        captured["include_covers"] = include_covers
-        return IngestResult(accepted=2, rejected=1, errors=[])
-
-    monkeypatch.setattr(main_module.springer_source, "ingest_repository", fake_ingest_repository)
-    monkeypatch.setattr(
-        main_module.store,
-        "get_checkpoint",
-        lambda checkpoint_key, repository_id=None: None,
-    )
-
-    response = client.post(
-        "/repositories/springer-oa/ingest/springer",
-        json={
-            "max_records": 25,
-            "max_requests_per_run": 2,
-            "books_only": True,
-            "verify_link_types": True,
-            "include_covers": True,
-        },
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["repository_id"] == "springer-oa"
-    assert payload["accepted"] == 2
-    assert payload["rejected"] == 1
-    assert captured["max_requests_per_run"] == 2
-    assert captured["books_only"] is True
-    assert captured["verify_link_types"] is True
-    assert captured["include_covers"] is True
+    assert any(item["properties"]["repositoryId"] == "demo-repo" for item in entries)
