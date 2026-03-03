@@ -783,3 +783,13 @@ def test_default_repository_cannot_be_deleted() -> None:
     _reset_store()
     response = client.delete("/repositories/default")
     assert response.status_code == 400
+
+
+def test_admin_ui_renders_repository_and_opds_json_controls() -> None:
+    response = client.get("/admin")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    body = response.text
+    assert "Multi-Repository OPDS Admin" in body
+    assert "/repositories/" in body
+    assert "/ingest/opds-json" in body

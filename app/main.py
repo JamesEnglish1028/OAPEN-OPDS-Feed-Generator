@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlencode, urljoin
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from app.cache import OpdsCache
@@ -731,6 +732,420 @@ def _get_repository_or_404(repository_id: str) -> RepositoryConfig:
     if repository is None:
         raise HTTPException(status_code=404, detail="Repository not found")
     return repository
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_ui() -> str:
+    return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OPDS Admin</title>
+  <style>
+    :root {
+      --bg: #f3efe4;
+      --card: rgba(255, 251, 242, 0.92);
+      --ink: #1f2933;
+      --muted: #52606d;
+      --line: #d9cbb0;
+      --accent: #a23e2a;
+      --accent-2: #2f6f62;
+      --shadow: 0 18px 40px rgba(64, 47, 23, 0.14);
+      --radius: 18px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Trebuchet MS", ui-sans-serif, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(162, 62, 42, 0.18), transparent 34%),
+        radial-gradient(circle at top right, rgba(47, 111, 98, 0.16), transparent 28%),
+        linear-gradient(180deg, #fbf6ea 0%, var(--bg) 100%);
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+    .hero {
+      display: grid;
+      gap: 14px;
+      margin-bottom: 22px;
+    }
+    .eyebrow {
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    h1 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(2rem, 4vw, 3.3rem);
+      line-height: 1.02;
+      max-width: 10ch;
+    }
+    .sub {
+      margin: 0;
+      color: var(--muted);
+      max-width: 70ch;
+      line-height: 1.5;
+    }
+    .grid {
+      display: grid;
+      gap: 18px;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      align-items: start;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid rgba(217, 203, 176, 0.75);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+      backdrop-filter: blur(8px);
+    }
+    .card h2 {
+      margin: 0 0 14px;
+      font-size: 1rem;
+      letter-spacing: 0.02em;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 13px;
+      background: rgba(255, 255, 255, 0.9);
+      color: var(--ink);
+      font: inherit;
+    }
+    textarea {
+      min-height: 112px;
+      resize: vertical;
+    }
+    .row {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .row-3 {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 10px 0 14px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .check input { width: auto; }
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 11px 16px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      color: white;
+      background: linear-gradient(135deg, var(--accent), #cf6a36);
+    }
+    button.secondary {
+      background: linear-gradient(135deg, var(--accent-2), #3f8f80);
+    }
+    button.ghost {
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.65);
+      border: 1px solid var(--line);
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .list {
+      display: grid;
+      gap: 10px;
+      max-height: 420px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+    .repo {
+      border: 1px solid rgba(217, 203, 176, 0.9);
+      border-radius: 14px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.6);
+    }
+    .repo strong, .repo code {
+      display: block;
+    }
+    .repo small {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+    }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #1f2933;
+      color: #d9e2ec;
+      padding: 14px;
+      border-radius: 14px;
+      min-height: 120px;
+      max-height: 320px;
+      overflow: auto;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .hint {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    @media (max-width: 720px) {
+      .row, .row-3 { grid-template-columns: 1fr; }
+      .wrap { padding: 20px 14px 48px; }
+      .card { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Operator Console</div>
+      <h1>Multi-Repository OPDS Admin</h1>
+      <p class="sub">Manage repository definitions, seed new OPDS-like JSON harvests, and inspect checkpoints without posting raw JSON by hand. This wraps the same API routes the service already exposes.</p>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <h2>Repositories</h2>
+        <p class="hint">Create or update a repository. Use <code>source_type</code> <code>opds-json</code> for remote OPDS-like feeds.</p>
+        <form id="repo-form">
+          <div class="row">
+            <div>
+              <label for="repo-id">Repository ID</label>
+              <input id="repo-id" name="repository_id" placeholder="example-repo" required>
+            </div>
+            <div>
+              <label for="repo-name">Name</label>
+              <input id="repo-name" name="name" placeholder="Example Repository" required>
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label for="repo-type">Source Type</label>
+              <select id="repo-type" name="source_type">
+                <option value="opds-json">opds-json</option>
+                <option value="json">json</option>
+                <option value="oai-pmh">oai-pmh</option>
+                <option value="mixed">mixed</option>
+              </select>
+            </div>
+            <div>
+              <label for="repo-config">Config JSON</label>
+              <textarea id="repo-config" name="config" placeholder="{}">{}</textarea>
+            </div>
+          </div>
+          <label class="check"><input id="repo-active" type="checkbox" checked> Active repository</label>
+          <div class="actions">
+            <button type="submit">Save Repository</button>
+            <button type="button" class="ghost" id="refresh-repos">Refresh List</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Harvest OPDS-Like JSON</h2>
+        <p class="hint">Seed a repository from a remote OPDS feed. This saves a checkpoint so later <code>/harvest/run</code> and the daily scheduler continue from <code>next_url</code>.</p>
+        <form id="harvest-form">
+          <div>
+            <label for="harvest-repo">Repository</label>
+            <select id="harvest-repo" name="repository_id"></select>
+          </div>
+          <div>
+            <label for="harvest-url">Remote Feed URL</label>
+            <input id="harvest-url" name="url" type="url" placeholder="https://example.org/catalog.json" required>
+          </div>
+          <div class="row-3">
+            <div>
+              <label for="harvest-max-pages">Max Pages</label>
+              <input id="harvest-max-pages" name="max_pages" type="number" min="1" placeholder="5">
+            </div>
+            <div>
+              <label for="harvest-max-records">Max Records</label>
+              <input id="harvest-max-records" name="max_records" type="number" min="1" placeholder="250">
+            </div>
+            <div>
+              <label for="harvest-timeout">Timeout (s)</label>
+              <input id="harvest-timeout" name="timeout_seconds" type="number" min="1" max="600" value="120">
+            </div>
+          </div>
+          <label class="check"><input id="harvest-follow-next" type="checkbox" checked> Follow <code>rel: next</code> links</label>
+          <label class="check"><input id="harvest-incremental" type="checkbox" checked> Persist checkpoint for scheduled harvests</label>
+          <div class="actions">
+            <button type="submit" class="secondary">Start Harvest</button>
+            <button type="button" class="ghost" id="load-checkpoints">Load Checkpoints</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Known Repositories</h2>
+        <div id="repo-list" class="list"></div>
+      </div>
+
+      <div class="card">
+        <h2>Output</h2>
+        <pre id="output">Ready.</pre>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const repoList = document.getElementById("repo-list");
+    const repoSelect = document.getElementById("harvest-repo");
+    const output = document.getElementById("output");
+
+    function show(data) {
+      output.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+    }
+
+    async function readJson(response) {
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        return response.json();
+      }
+      return response.text();
+    }
+
+    function normalizeConfigText(text) {
+      const trimmed = text.trim();
+      if (!trimmed) {
+        return {};
+      }
+      return JSON.parse(trimmed);
+    }
+
+    function renderRepositories(payload) {
+      const repositories = payload.repositories || [];
+      repoList.innerHTML = "";
+      repoSelect.innerHTML = "";
+      for (const repo of repositories) {
+        const option = document.createElement("option");
+        option.value = repo.repository_id;
+        option.textContent = repo.name + " (" + repo.repository_id + ")";
+        repoSelect.appendChild(option);
+
+        const card = document.createElement("div");
+        card.className = "repo";
+        card.innerHTML = [
+          "<strong>" + repo.name + "</strong>",
+          "<code>" + repo.repository_id + "</code>",
+          "<small>source_type: " + repo.source_type + " | active: " + repo.is_active + "</small>"
+        ].join("");
+        card.addEventListener("click", () => populateRepository(repo));
+        repoList.appendChild(card);
+      }
+    }
+
+    function populateRepository(repo) {
+      document.getElementById("repo-id").value = repo.repository_id;
+      document.getElementById("repo-name").value = repo.name;
+      document.getElementById("repo-type").value = repo.source_type;
+      document.getElementById("repo-config").value = JSON.stringify(repo.config || {}, null, 2);
+      document.getElementById("repo-active").checked = Boolean(repo.is_active);
+      repoSelect.value = repo.repository_id;
+    }
+
+    async function loadRepositories() {
+      const response = await fetch("/repositories");
+      const data = await readJson(response);
+      if (!response.ok) {
+        show(data);
+        return;
+      }
+      renderRepositories(data);
+      show(data);
+    }
+
+    async function saveRepository(event) {
+      event.preventDefault();
+      const repositoryId = document.getElementById("repo-id").value.trim();
+      const body = {
+        source_type: document.getElementById("repo-type").value,
+        name: document.getElementById("repo-name").value.trim(),
+        config: normalizeConfigText(document.getElementById("repo-config").value),
+        is_active: document.getElementById("repo-active").checked,
+      };
+      const response = await fetch("/repositories/" + encodeURIComponent(repositoryId), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await readJson(response);
+      show(data);
+      if (response.ok) {
+        await loadRepositories();
+      }
+    }
+
+    async function runHarvest(event) {
+      event.preventDefault();
+      const repositoryId = repoSelect.value;
+      const body = {
+        url: document.getElementById("harvest-url").value.trim(),
+        follow_next: document.getElementById("harvest-follow-next").checked,
+        incremental: document.getElementById("harvest-incremental").checked,
+        timeout_seconds: Number(document.getElementById("harvest-timeout").value) || 120,
+      };
+      const maxPages = document.getElementById("harvest-max-pages").value.trim();
+      const maxRecords = document.getElementById("harvest-max-records").value.trim();
+      if (maxPages) body.max_pages = Number(maxPages);
+      if (maxRecords) body.max_records = Number(maxRecords);
+
+      const response = await fetch("/repositories/" + encodeURIComponent(repositoryId) + "/ingest/opds-json", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await readJson(response);
+      show(data);
+    }
+
+    async function loadCheckpoints() {
+      const repositoryId = repoSelect.value;
+      const response = await fetch("/harvest/checkpoints?repository_id=" + encodeURIComponent(repositoryId));
+      const data = await readJson(response);
+      show(data);
+    }
+
+    document.getElementById("repo-form").addEventListener("submit", saveRepository);
+    document.getElementById("harvest-form").addEventListener("submit", runHarvest);
+    document.getElementById("refresh-repos").addEventListener("click", loadRepositories);
+    document.getElementById("load-checkpoints").addEventListener("click", loadCheckpoints);
+    loadRepositories().catch((error) => show({ error: String(error) }));
+  </script>
+</body>
+</html>"""
 
 
 @app.get("/health")

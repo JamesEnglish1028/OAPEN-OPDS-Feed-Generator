@@ -16,6 +16,7 @@ Small service that ingests OAPEN metadata (JSON or OAI-PMH Dublin Core) and expo
 - Async ingest jobs for JSON URLs (`POST /ingest/json-url/jobs`, `GET /ingest/jobs/{job_id}`)
 - Ingest from OAI-PMH endpoint with checkpointed incremental windows (`POST /ingest/oai-pmh`)
 - Multi-repository support with repository-scoped ingest/feed endpoints (`/repositories/{repository_id}/...`)
+- Built-in admin UI for repository management and OPDS-like JSON harvesting (`GET /admin`)
 - Normalize/validate records into OPDS-like publication entries
 - Paginated OPDS 2 feed (`GET /opds?page=1&page_size=50`)
 - Single publication endpoint (`GET /publications/{id}`)
@@ -46,6 +47,7 @@ uvicorn app.main:app --reload
 On Python `3.14+`, install a compatible PostgreSQL driver manually if you are not using SQLite.
 
 Open docs: `http://127.0.0.1:8000/docs`
+Admin UI: `http://127.0.0.1:8000/admin`
 
 Set database connection (optional):
 
