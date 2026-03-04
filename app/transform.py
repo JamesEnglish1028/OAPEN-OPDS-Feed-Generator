@@ -339,6 +339,7 @@ def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
     )
     publisher_metadata = first_valid_publisher(raw.get("publisher"), metadata.get("publisher"), metadata.get("imprint"))
     publisher_value = primary_publisher_name(publisher_metadata)
+    imprint_value = primary_publisher_name(first_valid_publisher(metadata.get("imprint")))
     belongs_to = metadata.get("belongsTo")
     series_name: str | None = None
     series_position: int | None = None
@@ -367,6 +368,10 @@ def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
     # Keep root navigation funder-based only; do not mirror publisher into collection.
     if collection and publisher_value and collection.casefold() == publisher_value.casefold():
         collection = None
+    if not collection and imprint_value:
+        collection = imprint_value
+    if not collection and publisher_value:
+        collection = publisher_value
 
     return NormalizedPublication(
         publication_id=identifier,

@@ -543,10 +543,12 @@ class PublicationStore:
 
     def list_collection_counts(self, repository_id: str = "default") -> list[dict[str, str | int]]:
         with self._session() as session:
+            count_expr = sqla_func.count(PublicationRow.publication_id)
             statement = (
-                select(PublicationRow.collection_slug, PublicationRow.collection, sqla_func.count(PublicationRow.publication_id))
+                select(PublicationRow.collection_slug, PublicationRow.collection, count_expr)
                 .where(PublicationRow.repository_id == repository_id, PublicationRow.collection_slug.is_not(None))
                 .group_by(PublicationRow.collection_slug, PublicationRow.collection)
+                .having(count_expr >= 2)
                 .order_by(PublicationRow.collection.asc())
             )
             rows = session.execute(statement).all()
