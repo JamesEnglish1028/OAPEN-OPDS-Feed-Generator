@@ -16,6 +16,15 @@ from app.subject_aliases import canonicalize_subject_term
 from app.subject_categories import classify_subject_category
 
 
+def _clamp_index_text(value: str | None, max_length: int = 512) -> str | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    return text[:max_length]
+
+
 def _slugify_value(value: str | None) -> str | None:
     if value is None:
         return None
@@ -26,7 +35,9 @@ def _slugify_value(value: str | None) -> str | None:
     slug = "".join(slug_chars).strip("-")
     while "--" in slug:
         slug = slug.replace("--", "-")
-    return slug or None
+    if not slug:
+        return None
+    return slug[:512]
 
 
 @dataclass
@@ -250,7 +261,7 @@ class PublicationStore:
         for subject in subjects:
             if not isinstance(subject, str):
                 continue
-            subject_name = canonicalize_subject_term(subject)
+            subject_name = _clamp_index_text(canonicalize_subject_term(subject))
             subject_slug = _slugify_value(subject_name)
             if not subject_name or not subject_slug:
                 continue
@@ -293,7 +304,7 @@ class PublicationStore:
         normalized_categories = []
         seen_categories: set[tuple[str, str]] = set()
         for item in normalized_subjects:
-            category_name = classify_subject_category(item["subject_name"])
+            category_name = _clamp_index_text(classify_subject_category(item["subject_name"]))
             category_slug = _slugify_value(category_name)
             if not category_name or not category_slug:
                 continue
