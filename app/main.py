@@ -1711,9 +1711,14 @@ def health() -> dict:
 
 @app.on_event("startup")
 def startup() -> None:
+    database_url = os.getenv("DATABASE_URL", "sqlite:///./oapen_opds.db")
     try:
-        database_url = os.getenv("DATABASE_URL", "sqlite:///./oapen_opds.db")
         run_migrations(database_url)
+    except BaseException:
+        # Temporary operational fallback: keep the service booting even if Alembic
+        # gets stuck on the category migration. The modeled tables are created below.
+        logger.exception("Database migration failed during startup; continuing with metadata initialization")
+    try:
         store.initialize()
         _ensure_default_repository()
         if os.getenv("SCHEDULER_ENABLED", "true").lower() == "true":
