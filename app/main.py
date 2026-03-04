@@ -748,7 +748,7 @@ def _attach_browse_facets(request: Request, response: dict, repository_id: str) 
             "title": item["name"],
             "properties": {"numberOfItems": int(item["count"])},
         }
-        for item in store.list_subject_counts(repository_id=repository_id)
+        for item in store.list_category_counts(repository_id=repository_id)
     ]
     if not collection_links and not classification_links:
         return response
@@ -787,6 +787,38 @@ def _cached_opds_response(request: Request, builder, repository_id: str) -> dict
     payload = builder()
     opds_cache.set_json(cache_key, payload)
     return payload
+
+
+def _attach_subclassification_facets(
+    *,
+    request: Request,
+    response: dict,
+    repository_id: str,
+    category_slug: str,
+) -> dict:
+    subject_links = [
+        {
+            "href": _build_url(
+                request,
+                f"{_classification_path_prefix(repository_id)}/{category_slug}/subjects/{item['slug']}",
+                {},
+            ),
+            "type": "application/opds+json",
+            "title": item["name"],
+            "properties": {"numberOfItems": int(item["count"])},
+        }
+        for item in store.list_subject_counts_for_category(category_slug=category_slug, repository_id=repository_id, min_count=1)
+    ]
+    if not subject_links:
+        return response
+    response["facets"] = [
+        *response.get("facets", []),
+        {
+            "metadata": {"title": "Sub-Classifications"},
+            "links": subject_links,
+        },
+    ]
+    return response
 
 
 def _get_repository_or_404(repository_id: str) -> RepositoryConfig:
@@ -2373,24 +2405,21 @@ def opds_classification_feed(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
 ) -> dict:
-    subject_entry = next(
-        (item for item in store.list_subject_counts(repository_id=DEFAULT_REPOSITORY_ID) if item["slug"] == classification_slug),
-        None,
-    )
-    if subject_entry is None:
+    category_entry = store.get_category(classification_slug, repository_id=DEFAULT_REPOSITORY_ID)
+    if category_entry is None:
         raise HTTPException(status_code=404, detail="Classification not found")
-    subject_name = str(subject_entry["name"])
+    category_name = str(category_entry["name"])
 
     def build_response() -> dict:
-        total, subset = store.page_by_subject_slug(
-            subject_slug=classification_slug,
+        total, subset = store.page_by_category_slug(
+            category_slug=classification_slug,
             page=page,
             page_size=page_size,
             repository_id=DEFAULT_REPOSITORY_ID,
         )
         response = _build_feed_response(
             request=request,
-            title=f"Classification: {subject_name}",
+            title=f"Classification: {category_name}",
             path=f"/opds/classifications/{classification_slug}",
             page=page,
             page_size=page_size,
@@ -2403,6 +2432,12 @@ def opds_classification_feed(
             response=response,
             language_counts=store.list_language_counts(repository_id=DEFAULT_REPOSITORY_ID),
             repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        response = _attach_subclassification_facets(
+            request=request,
+            response=response,
+            repository_id=DEFAULT_REPOSITORY_ID,
+            category_slug=classification_slug,
         )
         return _attach_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID)
 
@@ -2418,24 +2453,21 @@ def opds_classification_feed_repository(
     page_size: int = Query(default=50, ge=1, le=500),
 ) -> dict:
     _get_repository_or_404(repository_id)
-    subject_entry = next(
-        (item for item in store.list_subject_counts(repository_id=repository_id) if item["slug"] == classification_slug),
-        None,
-    )
-    if subject_entry is None:
+    category_entry = store.get_category(classification_slug, repository_id=repository_id)
+    if category_entry is None:
         raise HTTPException(status_code=404, detail="Classification not found")
-    subject_name = str(subject_entry["name"])
+    category_name = str(category_entry["name"])
 
     def build_response() -> dict:
-        total, subset = store.page_by_subject_slug(
-            subject_slug=classification_slug,
+        total, subset = store.page_by_category_slug(
+            category_slug=classification_slug,
             page=page,
             page_size=page_size,
             repository_id=repository_id,
         )
         response = _build_feed_response(
             request=request,
-            title=f"Classification: {subject_name}",
+            title=f"Classification: {category_name}",
             path=f"/repositories/{repository_id}/opds/classifications/{classification_slug}",
             page=page,
             page_size=page_size,
@@ -2443,6 +2475,128 @@ def opds_classification_feed_repository(
             subset=subset,
             repository_id=repository_id,
         )
+        response = _attach_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts(repository_id=repository_id),
+            repository_id=repository_id,
+        )
+        response = _attach_subclassification_facets(
+            request=request,
+            response=response,
+            repository_id=repository_id,
+            category_slug=classification_slug,
+        )
+        return _attach_browse_facets(request=request, response=response, repository_id=repository_id)
+
+    return _cached_opds_response(request, build_response, repository_id=repository_id)
+
+
+@app.get("/opds/classifications/{classification_slug}/subjects/{subject_slug}")
+def opds_subclassification_feed(
+    classification_slug: str,
+    subject_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    category_entry = store.get_category(classification_slug, repository_id=DEFAULT_REPOSITORY_ID)
+    if category_entry is None:
+        raise HTTPException(status_code=404, detail="Classification not found")
+    subject_entry = next(
+        (
+            item
+            for item in store.list_subject_counts_for_category(
+                category_slug=classification_slug,
+                repository_id=DEFAULT_REPOSITORY_ID,
+                min_count=1,
+            )
+            if item["slug"] == subject_slug
+        ),
+        None,
+    )
+    if subject_entry is None:
+        raise HTTPException(status_code=404, detail="Sub-classification not found")
+    subject_name = str(subject_entry["name"])
+    category_name = str(category_entry["name"])
+
+    def build_response() -> dict:
+        total, subset = store.page_by_subject_slug(
+            subject_slug=subject_slug,
+            page=page,
+            page_size=page_size,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        response = _build_feed_response(
+            request=request,
+            title=f"Sub-Classification: {subject_name}",
+            path=f"/opds/classifications/{classification_slug}/subjects/{subject_slug}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        response["metadata"]["belongsTo"] = {"classification": category_name}
+        response = _attach_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts(repository_id=DEFAULT_REPOSITORY_ID),
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        return _attach_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID)
+
+    return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
+
+
+@app.get("/repositories/{repository_id}/opds/classifications/{classification_slug}/subjects/{subject_slug}")
+def opds_subclassification_feed_repository(
+    repository_id: str,
+    classification_slug: str,
+    subject_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    _get_repository_or_404(repository_id)
+    category_entry = store.get_category(classification_slug, repository_id=repository_id)
+    if category_entry is None:
+        raise HTTPException(status_code=404, detail="Classification not found")
+    subject_entry = next(
+        (
+            item
+            for item in store.list_subject_counts_for_category(
+                category_slug=classification_slug,
+                repository_id=repository_id,
+                min_count=1,
+            )
+            if item["slug"] == subject_slug
+        ),
+        None,
+    )
+    if subject_entry is None:
+        raise HTTPException(status_code=404, detail="Sub-classification not found")
+    subject_name = str(subject_entry["name"])
+    category_name = str(category_entry["name"])
+
+    def build_response() -> dict:
+        total, subset = store.page_by_subject_slug(
+            subject_slug=subject_slug,
+            page=page,
+            page_size=page_size,
+            repository_id=repository_id,
+        )
+        response = _build_feed_response(
+            request=request,
+            title=f"Sub-Classification: {subject_name}",
+            path=f"/repositories/{repository_id}/opds/classifications/{classification_slug}/subjects/{subject_slug}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=repository_id,
+        )
+        response["metadata"]["belongsTo"] = {"classification": category_name}
         response = _attach_language_facets(
             request=request,
             response=response,
@@ -2756,6 +2910,21 @@ def classification_stats(
         "distinct_subject_labels": stats["distinct_subject_labels"],
         "displayable_facet_count": stats["displayable_facet_count"],
         "top_subjects": stats["top_subjects"],
+    }
+
+
+@app.get("/repositories/{repository_id}/classification-categories/stats")
+def classification_category_stats(
+    repository_id: str,
+    min_count: int = Query(default=3, ge=1),
+) -> dict:
+    _get_repository_or_404(repository_id)
+    categories = store.list_category_counts(repository_id=repository_id, min_count=min_count)
+    return {
+        "repository_id": repository_id,
+        "minimum_facet_count": min_count,
+        "displayable_category_count": len(categories),
+        "categories": categories,
     }
 
 

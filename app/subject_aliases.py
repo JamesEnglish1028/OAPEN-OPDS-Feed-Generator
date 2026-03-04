@@ -7,7 +7,7 @@ _WHITESPACE_RE = re.compile(r"\s+")
 _PUNCTUATION_RE = re.compile(r"[^a-z0-9]+")
 
 
-def _lookup_key(value: str) -> str:
+def subject_lookup_key(value: str) -> str:
     text = value.strip().casefold()
     if not text:
         return ""
@@ -62,7 +62,7 @@ def canonicalize_subject_term(value: str) -> str:
     candidate = value.strip()
     if not candidate:
         return ""
-    alias = SUBJECT_ALIASES.get(_lookup_key(candidate))
+    alias = SUBJECT_ALIASES.get(subject_lookup_key(candidate))
     if alias:
         return alias
     return _WHITESPACE_RE.sub(" ", candidate)
