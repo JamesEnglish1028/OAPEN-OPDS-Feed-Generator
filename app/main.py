@@ -1159,6 +1159,7 @@ def admin_ui() -> str:
     const repoSelect = document.getElementById("harvest-repo");
     const repoSummary = document.getElementById("repo-summary");
     const output = document.getElementById("output");
+    const subjectBackfillCursors = {};
 
     function show(data) {
       output.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
@@ -1196,6 +1197,9 @@ def admin_ui() -> str:
         repoSummary.textContent = "No default repository is currently configured.";
       }
       for (const repo of repositories) {
+        if (!(repo.repository_id in subjectBackfillCursors)) {
+          subjectBackfillCursors[repo.repository_id] = "";
+        }
         const option = document.createElement("option");
         option.value = repo.repository_id;
         option.textContent = repo.name + " (" + repo.repository_id + ")";
@@ -1280,14 +1284,24 @@ def admin_ui() -> str:
         show({ error: "Batch size must be between 1 and 5000." });
         return;
       }
+      const body = { batch_size: Math.floor(batchSize) };
+      const cursor = subjectBackfillCursors[repositoryId];
+      if (cursor) {
+        body.start_after = cursor;
+      }
       const response = await fetch("/repositories/" + encodeURIComponent(repositoryId) + "/backfill/subjects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ batch_size: Math.floor(batchSize) }),
+        body: JSON.stringify(body),
       });
       const data = await readJson(response);
       show(data);
       if (response.ok) {
+        if (data && typeof data.next_cursor === "string" && data.next_cursor) {
+          subjectBackfillCursors[repositoryId] = data.next_cursor;
+        } else if (data && data.has_more === false) {
+          subjectBackfillCursors[repositoryId] = "";
+        }
         await loadRepositories(repositoryId, { silent: true });
       }
     }
