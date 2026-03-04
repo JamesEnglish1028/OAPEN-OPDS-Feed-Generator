@@ -83,12 +83,52 @@ class RepositoryUpsertRequest(BaseModel):
     is_active: bool = True
 
 
+class CleanupByDomainRequest(BaseModel):
+    domain: str
+    dry_run: bool = False
+
+
 def _as_list(value):
     if value is None:
         return []
     if isinstance(value, list):
         return value
     return [value]
+
+
+def _iter_url_strings(value):
+    if isinstance(value, dict):
+        for item in value.values():
+            yield from _iter_url_strings(item)
+        return
+    if isinstance(value, list):
+        for item in value:
+            yield from _iter_url_strings(item)
+        return
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("http://") or text.startswith("https://"):
+            yield text
+
+
+def _url_matches_domain(url: str, domain: str) -> bool:
+    parsed = urlparse(url)
+    host = parsed.netloc.casefold()
+    target = domain.casefold()
+    return bool(host) and (host == target or host.endswith(f".{target}"))
+
+
+def _publication_matches_domain(publication, domain: str) -> bool:
+    candidates = []
+    if isinstance(publication.identifier, str) and publication.identifier.strip():
+        candidates.append(publication.identifier.strip())
+    candidates.extend(link.get("href", "") for link in publication.links if isinstance(link, dict))
+    if isinstance(publication.raw, dict):
+        candidates.extend(_iter_url_strings(publication.raw))
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate and _url_matches_domain(candidate, domain):
+            return True
+    return False
 
 
 ingest_jobs: dict[str, dict] = {}
@@ -1400,6 +1440,35 @@ def delete_repository(repository_id: str) -> dict:
         "repository_name": repository.name,
         "removed_publications": removed_publications,
         "removed_checkpoints": removed_checkpoints,
+    }
+
+
+@app.post("/repositories/{repository_id}/cleanup/domain")
+def cleanup_repository_by_domain(repository_id: str, request: CleanupByDomainRequest) -> dict:
+    repository = _get_repository_or_404(repository_id)
+    domain = request.domain.strip().casefold()
+    if not domain:
+        raise HTTPException(status_code=400, detail="domain is required")
+
+    matched_publications = [
+        publication.publication_id
+        for publication in store.all(repository_id=repository_id)
+        if _publication_matches_domain(publication, domain)
+    ]
+    removed = 0
+    if not request.dry_run and matched_publications:
+        removed = store.delete_publications(matched_publications, repository_id=repository_id)
+        _invalidate_opds_cache(repository_id)
+
+    return {
+        "repository_id": repository_id,
+        "repository_name": repository.name,
+        "domain": domain,
+        "dry_run": request.dry_run,
+        "matched_publications": len(matched_publications),
+        "removed_publications": removed,
+        "remaining_publications": store.count(repository_id=repository_id),
+        "matched_ids": matched_publications[:100],
     }
 
 

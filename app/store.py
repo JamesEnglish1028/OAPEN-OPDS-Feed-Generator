@@ -514,6 +514,19 @@ class PublicationStore:
             session.execute(statement)
             session.commit()
 
+    def delete_publications(self, publication_ids: list[str], repository_id: str = "default") -> int:
+        if not publication_ids:
+            return 0
+        storage_ids = [self._storage_publication_id(repository_id, publication_id) for publication_id in publication_ids]
+        with self._session() as session:
+            statement = PublicationRow.__table__.delete().where(
+                PublicationRow.repository_id == repository_id,
+                PublicationRow.publication_id.in_(storage_ids),
+            )
+            result = session.execute(statement)
+            session.commit()
+            return int(result.rowcount or 0)
+
     def clear_checkpoints(self, repository_id: str | None = None) -> None:
         with self._session() as session:
             statement = HarvestCheckpointRow.__table__.delete()

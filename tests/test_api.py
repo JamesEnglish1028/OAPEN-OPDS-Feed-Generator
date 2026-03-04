@@ -805,6 +805,51 @@ def test_default_repository_cannot_be_deleted() -> None:
     assert response.status_code == 400
 
 
+def test_cleanup_repository_by_domain_removes_only_matching_records(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "cleanup_domain_case.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "publications": [
+                    {
+                        "id": "keep-1",
+                        "title": "Keep Me",
+                        "links": [{"href": "https://library.oapen.org/handle/20.500.12657/12345"}],
+                    },
+                    {
+                        "id": "remove-1",
+                        "title": "Remove Me",
+                        "links": [{"href": "https://pressbooks.pub/example-book/download"}],
+                        "metadata": {"identifier": "https://pressbooks.pub/example-book"},
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+    assert ingest.json()["accepted"] == 2
+
+    dry_run = client.post("/repositories/default/cleanup/domain", json={"domain": "pressbooks.pub", "dry_run": True})
+    assert dry_run.status_code == 200
+    assert dry_run.json()["matched_publications"] == 1
+    assert dry_run.json()["removed_publications"] == 0
+
+    cleanup = client.post("/repositories/default/cleanup/domain", json={"domain": "pressbooks.pub"})
+    assert cleanup.status_code == 200
+    payload = cleanup.json()
+    assert payload["removed_publications"] == 1
+    assert payload["remaining_publications"] == 1
+
+    remaining = client.get("/opds?page=1&page_size=10")
+    assert remaining.status_code == 200
+    assert remaining.json()["metadata"]["numberOfItems"] == 1
+    assert remaining.json()["publications"][0]["metadata"]["title"] == "Keep Me"
+
+
 def test_admin_ui_renders_repository_and_opds_json_controls() -> None:
     response = client.get("/admin")
     assert response.status_code == 200
