@@ -445,6 +445,7 @@ class PublicationStore:
         *,
         batch_size: int = 500,
         start_after: str | None = None,
+        offset: int | None = None,
     ) -> SubjectBackfillResult:
         limit = max(1, min(batch_size, 5000))
         with self._session() as session:
@@ -453,7 +454,9 @@ class PublicationStore:
                 .where(PublicationRow.repository_id == repository_id)
                 .order_by(PublicationRow.publication_id.asc())
             )
-            if start_after:
+            if offset is not None:
+                statement = statement.offset(max(offset, 0))
+            elif start_after:
                 statement = statement.where(PublicationRow.publication_id > start_after)
             rows = session.execute(statement.limit(limit + 1)).all()
             has_more = len(rows) > limit

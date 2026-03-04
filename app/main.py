@@ -98,6 +98,7 @@ class CleanupByIdentifierPrefixRequest(BaseModel):
 class SubjectBackfillRequest(BaseModel):
     batch_size: int = Field(default=500, ge=1, le=5000)
     start_after: str | None = None
+    offset: int | None = Field(default=None, ge=0)
 
 
 def _as_list(value):
@@ -1970,6 +1971,7 @@ def backfill_repository_subjects(repository_id: str, request: SubjectBackfillReq
         repository_id=repository_id,
         batch_size=request.batch_size,
         start_after=request.start_after,
+        offset=request.offset,
     )
     if result.processed_publications:
         _invalidate_opds_cache(repository_id)
