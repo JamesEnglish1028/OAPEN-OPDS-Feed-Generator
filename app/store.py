@@ -78,6 +78,8 @@ class SubjectBackfillResult:
     indexed_subject_rows: int
     next_cursor: str | None
     has_more: bool
+    skipped_publications: int = 0
+    error_examples: list[dict[str, str]] | None = None
 
 
 class Base(DeclarativeBase):
@@ -474,36 +476,52 @@ class PublicationStore:
             work_rows = rows[:limit]
             processed_publications = 0
             indexed_subject_rows = 0
+            skipped_publications = 0
+            error_examples: list[dict[str, str]] = []
             next_cursor = None
             for publication_id, subjects_json in work_rows:
-                try:
-                    raw_subjects = json.loads(subjects_json or "[]")
-                except json.JSONDecodeError:
-                    raw_subjects = []
-                subjects = raw_subjects if isinstance(raw_subjects, list) else []
-                normalized_subjects = self._normalized_subject_rows(subjects)
-                normalized_categories = self._normalized_category_rows(normalized_subjects)
-                self._replace_publication_subjects(
-                    session,
-                    repository_id=repository_id,
-                    publication_id=publication_id,
-                    normalized_subjects=normalized_subjects,
-                )
-                self._replace_publication_subject_categories(
-                    session,
-                    repository_id=repository_id,
-                    publication_id=publication_id,
-                    normalized_categories=normalized_categories,
-                )
-                processed_publications += 1
-                indexed_subject_rows += len(normalized_subjects)
                 next_cursor = publication_id
+                try:
+                    try:
+                        raw_subjects = json.loads(subjects_json or "[]")
+                    except json.JSONDecodeError:
+                        raw_subjects = []
+                    subjects = raw_subjects if isinstance(raw_subjects, list) else []
+                    normalized_subjects = self._normalized_subject_rows(subjects)
+                    normalized_categories = self._normalized_category_rows(normalized_subjects)
+                    self._replace_publication_subjects(
+                        session,
+                        repository_id=repository_id,
+                        publication_id=publication_id,
+                        normalized_subjects=normalized_subjects,
+                    )
+                    self._replace_publication_subject_categories(
+                        session,
+                        repository_id=repository_id,
+                        publication_id=publication_id,
+                        normalized_categories=normalized_categories,
+                    )
+                    session.flush()
+                    processed_publications += 1
+                    indexed_subject_rows += len(normalized_subjects)
+                except Exception as exc:
+                    session.rollback()
+                    skipped_publications += 1
+                    if len(error_examples) < 10:
+                        error_examples.append(
+                            {
+                                "publication_id": publication_id,
+                                "error": str(exc),
+                            }
+                        )
             session.commit()
             return SubjectBackfillResult(
                 processed_publications=processed_publications,
                 indexed_subject_rows=indexed_subject_rows,
                 next_cursor=next_cursor,
                 has_more=has_more,
+                skipped_publications=skipped_publications,
+                error_examples=error_examples,
             )
 
     def get(self, publication_id: str, repository_id: str = "default") -> NormalizedPublication | None:

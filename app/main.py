@@ -1980,6 +1980,8 @@ def backfill_repository_subjects(repository_id: str, request: SubjectBackfillReq
         "repository_name": repository.name,
         "processed_publications": result.processed_publications,
         "indexed_subject_rows": result.indexed_subject_rows,
+        "skipped_publications": result.skipped_publications,
+        "error_examples": result.error_examples or [],
         "next_cursor": result.next_cursor,
         "has_more": result.has_more,
         "batch_size": request.batch_size,
