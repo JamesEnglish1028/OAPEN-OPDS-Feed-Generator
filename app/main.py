@@ -1234,7 +1234,7 @@ def admin_ui() -> str:
         <div class="card">
           <h2>Known Repositories</h2>
           <p id="repo-summary" class="summary">Loading repositories...</p>
-          <p class="hint">Select a repository to inspect it on the right. Use the selected panel for management actions such as backfill, clear, delete, or loading config into the edit form.</p>
+          <p class="hint">Select a repository to inspect it on the right. Use the selected panel for management actions such as subject reindex, clear, delete, or loading config into the edit form.</p>
           <div id="repo-list" class="list"></div>
         </div>
         <div class="card">
@@ -1376,7 +1376,7 @@ def admin_ui() -> str:
       const backfillButton = document.createElement("button");
       backfillButton.type = "button";
       backfillButton.className = "secondary";
-      backfillButton.textContent = "Backfill Classifications";
+      backfillButton.textContent = "Reindex Classifications";
       backfillButton.addEventListener("click", () => {
         backfillSubjects(repo.repository_id).catch((error) => show({ error: String(error) }));
       });
@@ -1479,7 +1479,7 @@ def admin_ui() -> str:
         show({ error: "Select a repository first." });
         return;
       }
-      const batchInput = window.prompt("Backfill batch size (1-5000):", "500");
+      const batchInput = window.prompt("Reindex batch size (1-5000):", "500");
       if (batchInput === null) {
         return;
       }
@@ -1493,7 +1493,7 @@ def admin_ui() -> str:
       if (cursor) {
         body.start_after = cursor;
       }
-      const response = await fetch("/repositories/" + encodeURIComponent(repositoryId) + "/backfill/subjects", {
+      const response = await fetch("/repositories/" + encodeURIComponent(repositoryId) + "/reindex/subjects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
