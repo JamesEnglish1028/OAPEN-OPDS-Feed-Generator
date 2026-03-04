@@ -2740,6 +2740,25 @@ def harvest_checkpoints(repository_id: str = Query(default=DEFAULT_REPOSITORY_ID
     return {"count": len(checkpoints), "checkpoints": checkpoints}
 
 
+@app.get("/repositories/{repository_id}/classifications/stats")
+def classification_stats(
+    repository_id: str,
+    min_count: int = Query(default=3, ge=1),
+    top_limit: int = Query(default=25, ge=1, le=200),
+) -> dict:
+    _get_repository_or_404(repository_id)
+    stats = store.subject_statistics(repository_id=repository_id, min_count=min_count, top_limit=top_limit)
+    return {
+        "repository_id": repository_id,
+        "minimum_facet_count": stats["minimum_facet_count"],
+        "total_assignments": stats["total_assignments"],
+        "distinct_subject_slugs": stats["distinct_subject_slugs"],
+        "distinct_subject_labels": stats["distinct_subject_labels"],
+        "displayable_facet_count": stats["displayable_facet_count"],
+        "top_subjects": stats["top_subjects"],
+    }
+
+
 @app.post("/harvest/run")
 def run_harvest(request: ManualHarvestRequest) -> dict:
     result = run_incremental_for_all_checkpoints(store=store, max_records=request.max_records)

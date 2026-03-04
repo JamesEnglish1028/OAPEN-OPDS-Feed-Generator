@@ -151,6 +151,66 @@ class PublicationStore:
     def _session(self) -> Session:
         return Session(self._engine)
 
+    def _subject_facet_rows(
+        self,
+        *,
+        repository_id: str,
+        min_count: int = 1,
+        limit: int | None = None,
+        order_by_count_desc: bool = False,
+    ) -> list[tuple[str, str, int]]:
+        effective_min_count = max(min_count, 1)
+        with self._session() as session:
+            variant_counts = (
+                select(
+                    PublicationSubjectRow.subject_slug.label("subject_slug"),
+                    PublicationSubjectRow.subject_name.label("subject_name"),
+                    sqla_func.count(PublicationSubjectRow.publication_id).label("variant_count"),
+                )
+                .where(PublicationSubjectRow.repository_id == repository_id)
+                .group_by(PublicationSubjectRow.subject_slug, PublicationSubjectRow.subject_name)
+            ).subquery()
+
+            ranked = (
+                select(
+                    variant_counts.c.subject_slug,
+                    variant_counts.c.subject_name,
+                    sqla_func.sum(variant_counts.c.variant_count)
+                    .over(partition_by=variant_counts.c.subject_slug)
+                    .label("total_count"),
+                    sa.func.row_number()
+                    .over(
+                        partition_by=variant_counts.c.subject_slug,
+                        order_by=(
+                            variant_counts.c.variant_count.desc(),
+                            sqla_func.length(variant_counts.c.subject_name).asc(),
+                            sqla_func.lower(variant_counts.c.subject_name).asc(),
+                        ),
+                    )
+                    .label("variant_rank"),
+                )
+            ).subquery()
+
+            statement = (
+                select(ranked.c.subject_slug, ranked.c.subject_name, ranked.c.total_count)
+                .where(
+                    ranked.c.variant_rank == 1,
+                    ranked.c.total_count >= effective_min_count,
+                )
+            )
+            if order_by_count_desc:
+                statement = statement.order_by(ranked.c.total_count.desc(), ranked.c.subject_name.asc())
+            else:
+                statement = statement.order_by(ranked.c.subject_name.asc())
+            if limit is not None:
+                statement = statement.limit(max(limit, 1))
+            rows = session.execute(statement).all()
+            return [
+                (slug, name, int(count))
+                for slug, name, count in rows
+                if isinstance(slug, str) and slug and isinstance(name, str) and name
+            ]
+
     @staticmethod
     def _normalized_subject_rows(subjects: list[Any]) -> list[dict[str, str]]:
         normalized_subjects = []
@@ -566,23 +626,59 @@ class PublicationStore:
             return [{"slug": slug, "name": name, "count": count} for slug, name, count in rows if slug and name]
 
     def list_subject_counts(self, repository_id: str = "default") -> list[dict[str, str | int]]:
+        rows = self._subject_facet_rows(repository_id=repository_id, min_count=3, order_by_count_desc=False)
+        return [{"slug": slug, "name": name, "count": count} for slug, name, count in rows]
+
+    def subject_statistics(
+        self,
+        repository_id: str = "default",
+        *,
+        min_count: int = 3,
+        top_limit: int = 25,
+    ) -> dict[str, Any]:
         with self._session() as session:
-            statement = (
-                select(
-                    PublicationSubjectRow.subject_slug,
-                    PublicationSubjectRow.subject_name,
-                    sqla_func.count(PublicationSubjectRow.publication_id),
+            total_assignments = int(
+                session.scalar(
+                    select(sqla_func.count())
+                    .select_from(PublicationSubjectRow)
+                    .where(PublicationSubjectRow.repository_id == repository_id)
                 )
-                .where(PublicationSubjectRow.repository_id == repository_id)
-                .group_by(PublicationSubjectRow.subject_slug, PublicationSubjectRow.subject_name)
-                .order_by(PublicationSubjectRow.subject_name.asc())
+                or 0
             )
-            rows = session.execute(statement).all()
-            return [
+            distinct_subject_slugs = int(
+                session.scalar(
+                    select(sqla_func.count(sqla_func.distinct(PublicationSubjectRow.subject_slug))).where(
+                        PublicationSubjectRow.repository_id == repository_id
+                    )
+                )
+                or 0
+            )
+            distinct_subject_labels = int(
+                session.scalar(
+                    select(sqla_func.count(sqla_func.distinct(PublicationSubjectRow.subject_name))).where(
+                        PublicationSubjectRow.repository_id == repository_id
+                    )
+                )
+                or 0
+            )
+            displayable_facet_count = len(self._subject_facet_rows(repository_id=repository_id, min_count=min_count))
+            top_subjects = [
                 {"slug": slug, "name": name, "count": count}
-                for slug, name, count in rows
-                if isinstance(slug, str) and slug and isinstance(name, str) and name
+                for slug, name, count in self._subject_facet_rows(
+                    repository_id=repository_id,
+                    min_count=min_count,
+                    limit=top_limit,
+                    order_by_count_desc=True,
+                )
             ]
+            return {
+                "total_assignments": total_assignments,
+                "distinct_subject_slugs": distinct_subject_slugs,
+                "distinct_subject_labels": distinct_subject_labels,
+                "displayable_facet_count": displayable_facet_count,
+                "minimum_facet_count": max(min_count, 1),
+                "top_subjects": top_subjects,
+            }
 
     def page_by_subject_slug(
         self,
