@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -11,6 +12,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql import func
 
 from app.models import NormalizedPublication
+from app.subject_aliases import canonicalize_subject_term
 
 
 def _slugify_value(value: str | None) -> str | None:
@@ -235,7 +237,7 @@ class PublicationStore:
         for subject in subjects:
             if not isinstance(subject, str):
                 continue
-            subject_name = subject.strip()
+            subject_name = canonicalize_subject_term(subject)
             subject_slug = _slugify_value(subject_name)
             if not subject_name or not subject_slug:
                 continue
@@ -696,6 +698,55 @@ class PublicationStore:
                 "minimum_facet_count": max(min_count, 1),
                 "top_subjects": top_subjects,
             }
+
+    def raw_subject_statistics(
+        self,
+        repository_id: str = "default",
+        *,
+        min_count: int = 1,
+        top_limit: int = 50,
+    ) -> dict[str, Any]:
+        effective_min_count = max(min_count, 1)
+        raw_counter: Counter[str] = Counter()
+        canonical_counter: Counter[str] = Counter()
+        with self._session() as session:
+            statement = select(PublicationRow.subjects_json).where(PublicationRow.repository_id == repository_id)
+            for subjects_json in session.scalars(statement):
+                try:
+                    values = json.loads(subjects_json or "[]")
+                except json.JSONDecodeError:
+                    values = []
+                if not isinstance(values, list):
+                    continue
+                for value in values:
+                    if not isinstance(value, str):
+                        continue
+                    raw_term = value.strip()
+                    if not raw_term:
+                        continue
+                    raw_counter[raw_term] += 1
+                    canonical_term = canonicalize_subject_term(raw_term)
+                    if canonical_term:
+                        canonical_counter[canonical_term] += 1
+
+        top_raw_subjects = [
+            {"name": name, "count": count}
+            for name, count in raw_counter.most_common(top_limit)
+            if count >= effective_min_count
+        ]
+        top_canonical_subjects = [
+            {"name": name, "count": count}
+            for name, count in canonical_counter.most_common(top_limit)
+            if count >= effective_min_count
+        ]
+        return {
+            "total_assignments": int(sum(raw_counter.values())),
+            "distinct_raw_subjects": len(raw_counter),
+            "distinct_canonical_subjects": len(canonical_counter),
+            "minimum_count": effective_min_count,
+            "top_raw_subjects": top_raw_subjects,
+            "top_canonical_subjects": top_canonical_subjects,
+        }
 
     def page_by_subject_slug(
         self,

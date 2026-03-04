@@ -2759,6 +2759,30 @@ def classification_stats(
     }
 
 
+@app.get("/repositories/{repository_id}/classifications/raw-stats")
+def classification_raw_stats(
+    repository_id: str,
+    min_count: int = Query(default=1, ge=1),
+    top_limit: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    _get_repository_or_404(repository_id)
+    stats = store.raw_subject_statistics(repository_id=repository_id, min_count=min_count, top_limit=top_limit)
+    return {
+        "repository_id": repository_id,
+        "minimum_count": stats["minimum_count"],
+        "total_assignments": stats["total_assignments"],
+        "distinct_raw_subjects": stats["distinct_raw_subjects"],
+        "distinct_canonical_subjects": stats["distinct_canonical_subjects"],
+        "top_raw_subjects": stats["top_raw_subjects"],
+        "top_canonical_subjects": stats["top_canonical_subjects"],
+    }
+
+
+@app.post("/repositories/{repository_id}/reindex/subjects")
+def reindex_repository_subjects(repository_id: str, request: SubjectBackfillRequest) -> dict:
+    return backfill_repository_subjects(repository_id=repository_id, request=request)
+
+
 @app.post("/harvest/run")
 def run_harvest(request: ManualHarvestRequest) -> dict:
     result = run_incremental_for_all_checkpoints(store=store, max_records=request.max_records)
