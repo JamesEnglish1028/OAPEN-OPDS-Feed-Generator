@@ -888,6 +888,12 @@ def admin_ui() -> str:
       display: grid;
       gap: 18px;
     }
+    .manage-grid {
+      display: grid;
+      gap: 18px;
+      grid-template-columns: minmax(320px, 1.2fr) minmax(280px, 0.8fr);
+      align-items: start;
+    }
     .section {
       display: grid;
       gap: 12px;
@@ -1063,6 +1069,44 @@ def admin_ui() -> str:
       font-size: 14px;
       line-height: 1.5;
     }
+    .detail-grid {
+      display: grid;
+      gap: 10px;
+    }
+    .detail-row {
+      display: grid;
+      gap: 4px;
+      padding: 10px 0;
+      border-top: 1px solid rgba(217, 203, 176, 0.7);
+    }
+    .detail-row:first-of-type {
+      border-top: 0;
+      padding-top: 0;
+    }
+    .detail-label {
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 700;
+    }
+    .detail-value {
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--ink);
+      word-break: break-word;
+    }
+    .detail-actions {
+      margin-top: 12px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .detail-actions a {
+      color: var(--accent-2);
+      font-weight: 700;
+      text-decoration: none;
+    }
     pre {
       margin: 0;
       white-space: pre-wrap;
@@ -1084,6 +1128,7 @@ def admin_ui() -> str:
       line-height: 1.5;
     }
     @media (max-width: 720px) {
+      .manage-grid { grid-template-columns: 1fr; }
       .row, .row-3 { grid-template-columns: 1fr; }
       .wrap { padding: 20px 14px 48px; }
       .card { padding: 16px; }
@@ -1185,12 +1230,18 @@ def admin_ui() -> str:
         <h2 class="section-title">Manage Repositories</h2>
         <p class="section-copy">Inspect repository state, open feeds, backfill classifications, clear harvested data, or remove non-default repositories.</p>
       </div>
-      <div class="stack">
+      <div class="manage-grid">
         <div class="card">
           <h2>Known Repositories</h2>
           <p id="repo-summary" class="summary">Loading repositories...</p>
           <p class="hint">Use <strong>Backfill Classifications</strong> to populate subject-based facets for existing records in small batches after the schema-only subject index migration.</p>
           <div id="repo-list" class="list"></div>
+        </div>
+        <div class="card">
+          <h2>Selected Repository</h2>
+          <p id="repo-detail-empty" class="summary">Select a repository card to inspect its current configuration and run management actions from one place.</p>
+          <div id="repo-detail" class="detail-grid" hidden></div>
+          <div id="repo-detail-actions" class="detail-actions" hidden></div>
         </div>
       </div>
     </section>
@@ -1214,8 +1265,12 @@ def admin_ui() -> str:
     const repoList = document.getElementById("repo-list");
     const repoSelect = document.getElementById("harvest-repo");
     const repoSummary = document.getElementById("repo-summary");
+    const repoDetail = document.getElementById("repo-detail");
+    const repoDetailEmpty = document.getElementById("repo-detail-empty");
+    const repoDetailActions = document.getElementById("repo-detail-actions");
     const output = document.getElementById("output");
     const subjectBackfillCursors = {};
+    let selectedRepository = null;
 
     function show(data) {
       output.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
@@ -1263,11 +1318,91 @@ def admin_ui() -> str:
       }
     }
 
+    function createDetailRow(label, value) {
+      const row = document.createElement("div");
+      row.className = "detail-row";
+      const labelNode = document.createElement("div");
+      labelNode.className = "detail-label";
+      labelNode.textContent = label;
+      const valueNode = document.createElement("div");
+      valueNode.className = "detail-value";
+      valueNode.textContent = value;
+      row.appendChild(labelNode);
+      row.appendChild(valueNode);
+      return row;
+    }
+
+    function renderRepositoryDetail(repo) {
+      selectedRepository = repo || null;
+      repoDetail.innerHTML = "";
+      repoDetailActions.innerHTML = "";
+      if (!repo) {
+        repoDetail.hidden = true;
+        repoDetailActions.hidden = true;
+        repoDetailEmpty.hidden = false;
+        return;
+      }
+
+      repoDetail.hidden = false;
+      repoDetailActions.hidden = false;
+      repoDetailEmpty.hidden = true;
+
+      const detailRows = [
+        createDetailRow("Repository", repo.name + " (" + repo.repository_id + ")"),
+        createDetailRow("Source Type", repo.source_type || "n/a"),
+        createDetailRow("Source Domain", repo.sourceDomain || "n/a"),
+        createDetailRow("Items", String(repo.publicationCount != null ? repo.publicationCount : 0)),
+        createDetailRow("Checkpoints", String(repo.checkpointCount != null ? repo.checkpointCount : 0)),
+        createDetailRow("Status", repo.is_active ? "Active" : "Inactive"),
+        createDetailRow("Config JSON", JSON.stringify(repo.config || {}, null, 2)),
+      ];
+      for (const row of detailRows) {
+        repoDetail.appendChild(row);
+      }
+
+      const openLink = document.createElement("a");
+      openLink.href = repo.feedHref;
+      openLink.target = "_blank";
+      openLink.rel = "noopener noreferrer";
+      openLink.textContent = "Open feed";
+      repoDetailActions.appendChild(openLink);
+
+      const backfillButton = document.createElement("button");
+      backfillButton.type = "button";
+      backfillButton.className = "secondary";
+      backfillButton.textContent = "Backfill Classifications";
+      backfillButton.addEventListener("click", () => {
+        backfillSubjects(repo.repository_id).catch((error) => show({ error: String(error) }));
+      });
+      repoDetailActions.appendChild(backfillButton);
+
+      if (!repo.isDefaultRepository) {
+        const clearButton = document.createElement("button");
+        clearButton.type = "button";
+        clearButton.className = "ghost";
+        clearButton.textContent = "Clear Data";
+        clearButton.addEventListener("click", () => {
+          clearRepositoryData(repo.repository_id).catch((error) => show({ error: String(error) }));
+        });
+        repoDetailActions.appendChild(clearButton);
+
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "ghost";
+        deleteButton.textContent = "Delete";
+        deleteButton.addEventListener("click", () => {
+          deleteRepository(repo.repository_id).catch((error) => show({ error: String(error) }));
+        });
+        repoDetailActions.appendChild(deleteButton);
+      }
+    }
+
     function renderRepositories(payload, preferredRepositoryId) {
       const repositories = payload.repositories || [];
       const selectedRepositoryId = preferredRepositoryId || repoSelect.value;
       repoList.innerHTML = "";
       repoSelect.innerHTML = "";
+      let detailRepository = null;
       const defaultRepo = repositories.find((repo) => repo.isDefaultRepository);
       if (defaultRepo) {
         repoSummary.textContent = "Default feed: " + defaultRepo.name + " (" + defaultRepo.repository_id + ").";
@@ -1277,6 +1412,9 @@ def admin_ui() -> str:
       for (const repo of repositories) {
         if (!(repo.repository_id in subjectBackfillCursors)) {
           subjectBackfillCursors[repo.repository_id] = "";
+        }
+        if (selectedRepository && selectedRepository.repository_id === repo.repository_id) {
+          detailRepository = repo;
         }
         const option = document.createElement("option");
         option.value = repo.repository_id;
@@ -1355,6 +1493,10 @@ def admin_ui() -> str:
       if (selectedRepositoryId && repositories.some((repo) => repo.repository_id === selectedRepositoryId)) {
         repoSelect.value = selectedRepositoryId;
       }
+      if (!detailRepository && selectedRepositoryId) {
+        detailRepository = repositories.find((repo) => repo.repository_id === selectedRepositoryId) || null;
+      }
+      renderRepositoryDetail(detailRepository);
     }
 
     async function backfillSubjects(explicitRepositoryId) {
@@ -1422,6 +1564,7 @@ def admin_ui() -> str:
       document.getElementById("repo-config").value = JSON.stringify(repo.config || {}, null, 2);
       document.getElementById("repo-active").checked = Boolean(repo.is_active);
       repoSelect.value = repo.repository_id;
+      renderRepositoryDetail(repo);
     }
 
     async function loadRepositories(preferredRepositoryId, options) {
@@ -1481,6 +1624,9 @@ def admin_ui() -> str:
       show(data);
       if (response.ok) {
         delete subjectBackfillCursors[repositoryId];
+        if (selectedRepository && selectedRepository.repository_id === repositoryId) {
+          renderRepositoryDetail(null);
+        }
         document.getElementById("repo-form").reset();
         document.getElementById("repo-config").value = "{}";
         document.getElementById("repo-active").checked = true;
