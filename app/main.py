@@ -1143,6 +1143,7 @@ def admin_ui() -> str:
       <div class="card">
         <h2>Known Repositories</h2>
         <p id="repo-summary" class="summary">Loading repositories...</p>
+        <p class="hint">Use <strong>Backfill Classifications</strong> to populate subject-based facets for existing records in small batches after the schema-only subject index migration.</p>
         <div id="repo-list" class="list"></div>
       </div>
 
@@ -1233,6 +1234,16 @@ def admin_ui() -> str:
         openLink.addEventListener("click", (event) => event.stopPropagation());
         actions.appendChild(openLink);
 
+        const backfillButton = document.createElement("button");
+        backfillButton.type = "button";
+        backfillButton.className = "secondary";
+        backfillButton.textContent = "Backfill Classifications";
+        backfillButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          backfillSubjects(repo.repository_id).catch((error) => show({ error: String(error) }));
+        });
+        actions.appendChild(backfillButton);
+
         if (!repo.isDefaultRepository) {
           const deleteButton = document.createElement("button");
           deleteButton.type = "button";
@@ -1251,6 +1262,33 @@ def admin_ui() -> str:
       }
       if (selectedRepositoryId && repositories.some((repo) => repo.repository_id === selectedRepositoryId)) {
         repoSelect.value = selectedRepositoryId;
+      }
+    }
+
+    async function backfillSubjects(explicitRepositoryId) {
+      const repositoryId = (explicitRepositoryId || repoSelect.value).trim();
+      if (!repositoryId) {
+        show({ error: "Select a repository first." });
+        return;
+      }
+      const batchInput = window.prompt("Backfill batch size (1-5000):", "500");
+      if (batchInput === null) {
+        return;
+      }
+      const batchSize = Number(batchInput.trim() || "500");
+      if (!Number.isFinite(batchSize) || batchSize < 1 || batchSize > 5000) {
+        show({ error: "Batch size must be between 1 and 5000." });
+        return;
+      }
+      const response = await fetch("/repositories/" + encodeURIComponent(repositoryId) + "/backfill/subjects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batch_size: Math.floor(batchSize) }),
+      });
+      const data = await readJson(response);
+      show(data);
+      if (response.ok) {
+        await loadRepositories(repositoryId);
       }
     }
 
