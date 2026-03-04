@@ -697,6 +697,12 @@ def _classification_path_prefix(repository_id: str) -> str:
     return f"/repositories/{repository_id}/opds/classifications"
 
 
+def _year_path_prefix(repository_id: str, year: int) -> str:
+    if repository_id == DEFAULT_REPOSITORY_ID:
+        return f"/opds/years/{year}"
+    return f"/repositories/{repository_id}/opds/years/{year}"
+
+
 def _attach_language_facets(request: Request, response: dict, language_counts: list[dict[str, str | int]], repository_id: str) -> dict:
     links = response.setdefault("links", [])
     is_default_repository = repository_id == DEFAULT_REPOSITORY_ID
@@ -716,6 +722,42 @@ def _attach_language_facets(request: Request, response: dict, language_counts: l
             "links": [
                 {
                     "href": _build_url(request, f"{_language_path_prefix(repository_id)}/{item['code']}", {}),
+                    "type": "application/opds+json",
+                    "title": _language_label(str(item["code"])),
+                    "properties": {"numberOfItems": int(item["count"])},
+                }
+                for item in language_counts
+            ],
+        },
+        *existing_facets,
+    ]
+    return response
+
+
+def _attach_year_language_facets(
+    request: Request,
+    response: dict,
+    language_counts: list[dict[str, str | int]],
+    repository_id: str,
+    year: int,
+) -> dict:
+    links = response.setdefault("links", [])
+    start_path = _year_path_prefix(repository_id, year)
+    if not any(isinstance(link, dict) and link.get("rel") == "start" for link in links):
+        links.append(
+            {
+                "rel": "start",
+                "href": _build_url(request, start_path, {}),
+                "type": "application/opds+json",
+            }
+        )
+    existing_facets = response.get("facets", [])
+    response["facets"] = [
+        {
+            "metadata": {"title": "Language"},
+            "links": [
+                {
+                    "href": _build_url(request, f"{start_path}/languages/{item['code']}", {}),
                     "type": "application/opds+json",
                     "title": _language_label(str(item["code"])),
                     "properties": {"numberOfItems": int(item["count"])},
@@ -774,6 +816,38 @@ def _attach_browse_facets(request: Request, response: dict, repository_id: str) 
     return response
 
 
+def _attach_year_browse_facets(request: Request, response: dict, repository_id: str, year: int) -> dict:
+    year_prefix = _year_path_prefix(repository_id, year)
+    collection_links = [
+        {
+            "href": _build_url(request, f"{year_prefix}/collections/{item['slug']}", {}),
+            "type": "application/opds+json",
+            "title": item["name"],
+            "properties": {"numberOfItems": int(item["count"])},
+        }
+        for item in store.list_collection_counts_by_publication_year(year=year, repository_id=repository_id)
+    ]
+    classification_links = [
+        {
+            "href": _build_url(request, f"{year_prefix}/classifications/{item['slug']}", {}),
+            "type": "application/opds+json",
+            "title": item["name"],
+            "properties": {"numberOfItems": int(item["count"])},
+        }
+        for item in store.list_category_counts_by_publication_year(year=year, repository_id=repository_id)
+    ]
+    if not collection_links and not classification_links:
+        return response
+    existing_facets = response.get("facets", [])
+    appended_facets = []
+    if collection_links:
+        appended_facets.append({"metadata": {"title": "Collections"}, "links": collection_links})
+    if classification_links:
+        appended_facets.append({"metadata": {"title": "Classifications"}, "links": classification_links})
+    response["facets"] = [*existing_facets, *appended_facets]
+    return response
+
+
 def _invalidate_opds_cache(repository_id: str | None = None) -> None:
     if repository_id is None:
         opds_cache.invalidate_feed_keys()
@@ -797,19 +871,35 @@ def _attach_subclassification_facets(
     response: dict,
     repository_id: str,
     category_slug: str,
+    year: int | None = None,
 ) -> dict:
+    subject_items = (
+        store.list_subject_counts_for_category_by_publication_year(
+            category_slug=category_slug,
+            year=year,
+            repository_id=repository_id,
+            min_count=1,
+        )
+        if year is not None
+        else store.list_subject_counts_for_category(category_slug=category_slug, repository_id=repository_id, min_count=1)
+    )
+    path_prefix = (
+        f"{_year_path_prefix(repository_id, year)}/classifications/{category_slug}"
+        if year is not None
+        else f"{_classification_path_prefix(repository_id)}/{category_slug}"
+    )
     subject_links = [
         {
             "href": _build_url(
                 request,
-                f"{_classification_path_prefix(repository_id)}/{category_slug}/subjects/{item['slug']}",
+                f"{path_prefix}/subjects/{item['slug']}",
                 {},
             ),
             "type": "application/opds+json",
             "title": item["name"],
             "properties": {"numberOfItems": int(item["count"])},
         }
-        for item in store.list_subject_counts_for_category(category_slug=category_slug, repository_id=repository_id, min_count=1)
+        for item in subject_items
     ]
     if not subject_links:
         return response
@@ -2640,13 +2730,19 @@ def opds_year_feed(
             repository_id=DEFAULT_REPOSITORY_ID,
         )
         language_counts = store.list_language_counts_by_publication_year(year=year, repository_id=DEFAULT_REPOSITORY_ID)
-        response = _attach_language_facets(
+        response = _attach_year_language_facets(
             request=request,
             response=response,
             language_counts=language_counts,
             repository_id=DEFAULT_REPOSITORY_ID,
+            year=year,
         )
-        return _attach_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID)
+        return _attach_year_browse_facets(
+            request=request,
+            response=response,
+            repository_id=DEFAULT_REPOSITORY_ID,
+            year=year,
+        )
 
     return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
 
@@ -2674,13 +2770,422 @@ def opds_year_feed_repository(
             repository_id=repository_id,
         )
         language_counts = store.list_language_counts_by_publication_year(year=year, repository_id=repository_id)
-        response = _attach_language_facets(
+        response = _attach_year_language_facets(
             request=request,
             response=response,
             language_counts=language_counts,
             repository_id=repository_id,
+            year=year,
         )
-        return _attach_browse_facets(request=request, response=response, repository_id=repository_id)
+        return _attach_year_browse_facets(
+            request=request,
+            response=response,
+            repository_id=repository_id,
+            year=year,
+        )
+
+    return _cached_opds_response(request, build_response, repository_id=repository_id)
+
+
+@app.get("/opds/years/{year}/collections/{collection_slug}")
+def opds_year_collection_feed(
+    year: int,
+    collection_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    def build_response() -> dict:
+        total, subset = store.page_by_collection_slug_and_publication_year(
+            collection_slug=collection_slug,
+            year=year,
+            page=page,
+            page_size=page_size,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        response = _build_feed_response(
+            request=request,
+            title=f"Publication Year {year} / Collection: {collection_slug}",
+            path=f"/opds/years/{year}/collections/{collection_slug}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        response = _attach_year_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts_by_publication_year(year=year, repository_id=DEFAULT_REPOSITORY_ID),
+            repository_id=DEFAULT_REPOSITORY_ID,
+            year=year,
+        )
+        return _attach_year_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID, year=year)
+
+    return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
+
+
+@app.get("/repositories/{repository_id}/opds/years/{year}/collections/{collection_slug}")
+def opds_year_collection_feed_repository(
+    repository_id: str,
+    year: int,
+    collection_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    _get_repository_or_404(repository_id)
+
+    def build_response() -> dict:
+        total, subset = store.page_by_collection_slug_and_publication_year(
+            collection_slug=collection_slug,
+            year=year,
+            page=page,
+            page_size=page_size,
+            repository_id=repository_id,
+        )
+        response = _build_feed_response(
+            request=request,
+            title=f"Publication Year {year} / Collection: {collection_slug}",
+            path=f"/repositories/{repository_id}/opds/years/{year}/collections/{collection_slug}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=repository_id,
+        )
+        response = _attach_year_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts_by_publication_year(year=year, repository_id=repository_id),
+            repository_id=repository_id,
+            year=year,
+        )
+        return _attach_year_browse_facets(request=request, response=response, repository_id=repository_id, year=year)
+
+    return _cached_opds_response(request, build_response, repository_id=repository_id)
+
+
+@app.get("/opds/years/{year}/classifications/{classification_slug}")
+def opds_year_classification_feed(
+    year: int,
+    classification_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    category_entry = next(
+        (item for item in store.list_category_counts_by_publication_year(year=year, repository_id=DEFAULT_REPOSITORY_ID) if item["slug"] == classification_slug),
+        None,
+    )
+    if category_entry is None:
+        raise HTTPException(status_code=404, detail="Classification not found")
+    category_name = str(category_entry["name"])
+
+    def build_response() -> dict:
+        total, subset = store.page_by_category_slug_and_publication_year(
+            category_slug=classification_slug,
+            year=year,
+            page=page,
+            page_size=page_size,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        response = _build_feed_response(
+            request=request,
+            title=f"Publication Year {year} / Classification: {category_name}",
+            path=f"/opds/years/{year}/classifications/{classification_slug}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        response = _attach_year_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts_by_publication_year(year=year, repository_id=DEFAULT_REPOSITORY_ID),
+            repository_id=DEFAULT_REPOSITORY_ID,
+            year=year,
+        )
+        response = _attach_subclassification_facets(
+            request=request,
+            response=response,
+            repository_id=DEFAULT_REPOSITORY_ID,
+            category_slug=classification_slug,
+            year=year,
+        )
+        return _attach_year_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID, year=year)
+
+    return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
+
+
+@app.get("/repositories/{repository_id}/opds/years/{year}/classifications/{classification_slug}")
+def opds_year_classification_feed_repository(
+    repository_id: str,
+    year: int,
+    classification_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    _get_repository_or_404(repository_id)
+    category_entry = next(
+        (item for item in store.list_category_counts_by_publication_year(year=year, repository_id=repository_id) if item["slug"] == classification_slug),
+        None,
+    )
+    if category_entry is None:
+        raise HTTPException(status_code=404, detail="Classification not found")
+    category_name = str(category_entry["name"])
+
+    def build_response() -> dict:
+        total, subset = store.page_by_category_slug_and_publication_year(
+            category_slug=classification_slug,
+            year=year,
+            page=page,
+            page_size=page_size,
+            repository_id=repository_id,
+        )
+        response = _build_feed_response(
+            request=request,
+            title=f"Publication Year {year} / Classification: {category_name}",
+            path=f"/repositories/{repository_id}/opds/years/{year}/classifications/{classification_slug}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=repository_id,
+        )
+        response = _attach_year_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts_by_publication_year(year=year, repository_id=repository_id),
+            repository_id=repository_id,
+            year=year,
+        )
+        response = _attach_subclassification_facets(
+            request=request,
+            response=response,
+            repository_id=repository_id,
+            category_slug=classification_slug,
+            year=year,
+        )
+        return _attach_year_browse_facets(request=request, response=response, repository_id=repository_id, year=year)
+
+    return _cached_opds_response(request, build_response, repository_id=repository_id)
+
+
+@app.get("/opds/years/{year}/classifications/{classification_slug}/subjects/{subject_slug}")
+def opds_year_subclassification_feed(
+    year: int,
+    classification_slug: str,
+    subject_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    category_entry = next(
+        (item for item in store.list_category_counts_by_publication_year(year=year, repository_id=DEFAULT_REPOSITORY_ID) if item["slug"] == classification_slug),
+        None,
+    )
+    if category_entry is None:
+        raise HTTPException(status_code=404, detail="Classification not found")
+    subject_entry = next(
+        (
+            item
+            for item in store.list_subject_counts_for_category_by_publication_year(
+                category_slug=classification_slug,
+                year=year,
+                repository_id=DEFAULT_REPOSITORY_ID,
+                min_count=1,
+            )
+            if item["slug"] == subject_slug
+        ),
+        None,
+    )
+    if subject_entry is None:
+        raise HTTPException(status_code=404, detail="Sub-classification not found")
+    subject_name = str(subject_entry["name"])
+    category_name = str(category_entry["name"])
+
+    def build_response() -> dict:
+        total, subset = store.page_by_subject_slug_and_publication_year(
+            subject_slug=subject_slug,
+            year=year,
+            page=page,
+            page_size=page_size,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        response = _build_feed_response(
+            request=request,
+            title=f"Publication Year {year} / Sub-Classification: {subject_name}",
+            path=f"/opds/years/{year}/classifications/{classification_slug}/subjects/{subject_slug}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        response["metadata"]["belongsTo"] = {"classification": category_name}
+        response = _attach_year_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts_by_publication_year(year=year, repository_id=DEFAULT_REPOSITORY_ID),
+            repository_id=DEFAULT_REPOSITORY_ID,
+            year=year,
+        )
+        return _attach_year_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID, year=year)
+
+    return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
+
+
+@app.get("/repositories/{repository_id}/opds/years/{year}/classifications/{classification_slug}/subjects/{subject_slug}")
+def opds_year_subclassification_feed_repository(
+    repository_id: str,
+    year: int,
+    classification_slug: str,
+    subject_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    _get_repository_or_404(repository_id)
+    category_entry = next(
+        (item for item in store.list_category_counts_by_publication_year(year=year, repository_id=repository_id) if item["slug"] == classification_slug),
+        None,
+    )
+    if category_entry is None:
+        raise HTTPException(status_code=404, detail="Classification not found")
+    subject_entry = next(
+        (
+            item
+            for item in store.list_subject_counts_for_category_by_publication_year(
+                category_slug=classification_slug,
+                year=year,
+                repository_id=repository_id,
+                min_count=1,
+            )
+            if item["slug"] == subject_slug
+        ),
+        None,
+    )
+    if subject_entry is None:
+        raise HTTPException(status_code=404, detail="Sub-classification not found")
+    subject_name = str(subject_entry["name"])
+    category_name = str(category_entry["name"])
+
+    def build_response() -> dict:
+        total, subset = store.page_by_subject_slug_and_publication_year(
+            subject_slug=subject_slug,
+            year=year,
+            page=page,
+            page_size=page_size,
+            repository_id=repository_id,
+        )
+        response = _build_feed_response(
+            request=request,
+            title=f"Publication Year {year} / Sub-Classification: {subject_name}",
+            path=f"/repositories/{repository_id}/opds/years/{year}/classifications/{classification_slug}/subjects/{subject_slug}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=repository_id,
+        )
+        response["metadata"]["belongsTo"] = {"classification": category_name}
+        response = _attach_year_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts_by_publication_year(year=year, repository_id=repository_id),
+            repository_id=repository_id,
+            year=year,
+        )
+        return _attach_year_browse_facets(request=request, response=response, repository_id=repository_id, year=year)
+
+    return _cached_opds_response(request, build_response, repository_id=repository_id)
+
+
+@app.get("/opds/years/{year}/languages/{language_code}")
+def opds_year_language_feed(
+    year: int,
+    language_code: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    normalized_language = normalize_language_value(language_code)
+    if normalized_language is None:
+        raise HTTPException(status_code=400, detail="language_code must be a 2-letter code, 3-letter code, or language name.")
+
+    def build_response() -> dict:
+        total, subset = store.page_by_language_and_publication_year(
+            language=normalized_language,
+            year=year,
+            page=page,
+            page_size=page_size,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        response = _build_feed_response(
+            request=request,
+            title=f"Publication Year {year} / Language: {_language_label(normalized_language)}",
+            path=f"/opds/years/{year}/languages/{normalized_language}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        response = _attach_year_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts_by_publication_year(year=year, repository_id=DEFAULT_REPOSITORY_ID),
+            repository_id=DEFAULT_REPOSITORY_ID,
+            year=year,
+        )
+        return _attach_year_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID, year=year)
+
+    return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
+
+
+@app.get("/repositories/{repository_id}/opds/years/{year}/languages/{language_code}")
+def opds_year_language_feed_repository(
+    repository_id: str,
+    year: int,
+    language_code: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    _get_repository_or_404(repository_id)
+    normalized_language = normalize_language_value(language_code)
+    if normalized_language is None:
+        raise HTTPException(status_code=400, detail="language_code must be a 2-letter code, 3-letter code, or language name.")
+
+    def build_response() -> dict:
+        total, subset = store.page_by_language_and_publication_year(
+            language=normalized_language,
+            year=year,
+            page=page,
+            page_size=page_size,
+            repository_id=repository_id,
+        )
+        response = _build_feed_response(
+            request=request,
+            title=f"Publication Year {year} / Language: {_language_label(normalized_language)}",
+            path=f"/repositories/{repository_id}/opds/years/{year}/languages/{normalized_language}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=repository_id,
+        )
+        response = _attach_year_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts_by_publication_year(year=year, repository_id=repository_id),
+            repository_id=repository_id,
+            year=year,
+        )
+        return _attach_year_browse_facets(request=request, response=response, repository_id=repository_id, year=year)
 
     return _cached_opds_response(request, build_response, repository_id=repository_id)
 

@@ -703,6 +703,27 @@ class PublicationStore:
             rows = session.execute(statement).all()
             return [{"slug": slug, "name": name, "count": count} for slug, name, count in rows if slug and name]
 
+    def list_collection_counts_by_publication_year(
+        self,
+        year: int,
+        repository_id: str = "default",
+    ) -> list[dict[str, str | int]]:
+        with self._session() as session:
+            count_expr = sqla_func.count(PublicationRow.publication_id)
+            statement = (
+                select(PublicationRow.collection_slug, PublicationRow.collection, count_expr)
+                .where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.publication_year == year,
+                    PublicationRow.collection_slug.is_not(None),
+                )
+                .group_by(PublicationRow.collection_slug, PublicationRow.collection)
+                .having(count_expr >= 2)
+                .order_by(PublicationRow.collection.asc())
+            )
+            rows = session.execute(statement).all()
+            return [{"slug": slug, "name": name, "count": int(count)} for slug, name, count in rows if slug and name]
+
     def list_series_counts(self, repository_id: str = "default") -> list[dict[str, str | int]]:
         with self._session() as session:
             statement = (
@@ -734,6 +755,50 @@ class PublicationStore:
                 out.append({"slug": slug, "name": name, "count": count})
         return out
 
+    def list_subject_counts_for_category_by_publication_year(
+        self,
+        category_slug: str,
+        year: int,
+        repository_id: str = "default",
+        *,
+        min_count: int = 1,
+    ) -> list[dict[str, str | int]]:
+        effective_min_count = max(min_count, 1)
+        with self._session() as session:
+            count_expr = sqla_func.count(sqla_func.distinct(PublicationSubjectRow.publication_id))
+            statement = (
+                select(
+                    PublicationSubjectRow.subject_slug,
+                    PublicationSubjectRow.subject_name,
+                    count_expr,
+                )
+                .join(
+                    PublicationRow,
+                    and_(
+                        PublicationRow.publication_id == PublicationSubjectRow.publication_id,
+                        PublicationRow.repository_id == PublicationSubjectRow.repository_id,
+                    ),
+                )
+                .where(
+                    PublicationSubjectRow.repository_id == repository_id,
+                    PublicationRow.publication_year == year,
+                )
+                .group_by(PublicationSubjectRow.subject_slug, PublicationSubjectRow.subject_name)
+                .having(count_expr >= effective_min_count)
+            )
+            rows = session.execute(statement).all()
+
+        out = []
+        for slug, name, count in rows:
+            if not isinstance(slug, str) or not slug or not isinstance(name, str) or not name:
+                continue
+            mapped_category = classify_subject_category(name)
+            mapped_slug = _slugify_value(mapped_category)
+            if mapped_slug == category_slug:
+                out.append({"slug": slug, "name": name, "count": int(count)})
+        out.sort(key=lambda item: str(item["name"]).casefold())
+        return out
+
     def list_category_counts(self, repository_id: str = "default", *, min_count: int = 3) -> list[dict[str, str | int]]:
         effective_min_count = max(min_count, 1)
         with self._session() as session:
@@ -741,6 +806,44 @@ class PublicationStore:
             statement = (
                 select(PublicationSubjectCategoryRow.category_slug, PublicationSubjectCategoryRow.category_name, count_expr)
                 .where(PublicationSubjectCategoryRow.repository_id == repository_id)
+                .group_by(PublicationSubjectCategoryRow.category_slug, PublicationSubjectCategoryRow.category_name)
+                .having(count_expr >= effective_min_count)
+                .order_by(PublicationSubjectCategoryRow.category_name.asc())
+            )
+            rows = session.execute(statement).all()
+            return [
+                {"slug": slug, "name": name, "count": int(count)}
+                for slug, name, count in rows
+                if isinstance(slug, str) and slug and isinstance(name, str) and name
+            ]
+
+    def list_category_counts_by_publication_year(
+        self,
+        year: int,
+        repository_id: str = "default",
+        *,
+        min_count: int = 3,
+    ) -> list[dict[str, str | int]]:
+        effective_min_count = max(min_count, 1)
+        with self._session() as session:
+            count_expr = sqla_func.count(sqla_func.distinct(PublicationSubjectCategoryRow.publication_id))
+            statement = (
+                select(
+                    PublicationSubjectCategoryRow.category_slug,
+                    PublicationSubjectCategoryRow.category_name,
+                    count_expr,
+                )
+                .join(
+                    PublicationRow,
+                    and_(
+                        PublicationRow.publication_id == PublicationSubjectCategoryRow.publication_id,
+                        PublicationRow.repository_id == PublicationSubjectCategoryRow.repository_id,
+                    ),
+                )
+                .where(
+                    PublicationSubjectCategoryRow.repository_id == repository_id,
+                    PublicationRow.publication_year == year,
+                )
                 .group_by(PublicationSubjectCategoryRow.category_slug, PublicationSubjectCategoryRow.category_name)
                 .having(count_expr >= effective_min_count)
                 .order_by(PublicationSubjectCategoryRow.category_name.asc())
@@ -895,6 +998,56 @@ class PublicationStore:
             rows = session.scalars(statement).all()
             return total, [self._to_publication(row) for row in rows]
 
+    def page_by_subject_slug_and_publication_year(
+        self,
+        subject_slug: str,
+        year: int,
+        page: int,
+        page_size: int,
+        repository_id: str = "default",
+    ) -> tuple[int, list[NormalizedPublication]]:
+        offset = (page - 1) * page_size
+        with self._session() as session:
+            total = int(
+                session.scalar(
+                    select(sqla_func.count(sqla_func.distinct(PublicationSubjectRow.publication_id)))
+                    .select_from(PublicationSubjectRow)
+                    .join(
+                        PublicationRow,
+                        and_(
+                            PublicationRow.publication_id == PublicationSubjectRow.publication_id,
+                            PublicationRow.repository_id == PublicationSubjectRow.repository_id,
+                        ),
+                    )
+                    .where(
+                        PublicationSubjectRow.repository_id == repository_id,
+                        PublicationSubjectRow.subject_slug == subject_slug,
+                        PublicationRow.publication_year == year,
+                    )
+                )
+                or 0
+            )
+            statement = (
+                select(PublicationRow)
+                .join(
+                    PublicationSubjectRow,
+                    and_(
+                        PublicationSubjectRow.publication_id == PublicationRow.publication_id,
+                        PublicationSubjectRow.repository_id == PublicationRow.repository_id,
+                    ),
+                )
+                .where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.publication_year == year,
+                    PublicationSubjectRow.subject_slug == subject_slug,
+                )
+                .order_by(PublicationRow.source_publication_id.asc(), PublicationRow.publication_id.asc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            rows = session.scalars(statement).all()
+            return total, [self._to_publication(row) for row in rows]
+
     def page_by_category_slug(
         self,
         category_slug: str,
@@ -917,6 +1070,63 @@ class PublicationStore:
                     .where(
                         PublicationSubjectCategoryRow.repository_id == repository_id,
                         PublicationSubjectCategoryRow.category_slug == category_slug,
+                    )
+                )
+                or 0
+            )
+            statement = (
+                select(PublicationRow)
+                .where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.publication_id.in_(matching_publication_ids),
+                )
+                .order_by(PublicationRow.source_publication_id.asc(), PublicationRow.publication_id.asc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            rows = session.scalars(statement).all()
+            return total, [self._to_publication(row) for row in rows]
+
+    def page_by_category_slug_and_publication_year(
+        self,
+        category_slug: str,
+        year: int,
+        page: int,
+        page_size: int,
+        repository_id: str = "default",
+    ) -> tuple[int, list[NormalizedPublication]]:
+        offset = (page - 1) * page_size
+        with self._session() as session:
+            matching_publication_ids = (
+                select(PublicationSubjectCategoryRow.publication_id)
+                .join(
+                    PublicationRow,
+                    and_(
+                        PublicationRow.publication_id == PublicationSubjectCategoryRow.publication_id,
+                        PublicationRow.repository_id == PublicationSubjectCategoryRow.repository_id,
+                    ),
+                )
+                .where(
+                    PublicationSubjectCategoryRow.repository_id == repository_id,
+                    PublicationSubjectCategoryRow.category_slug == category_slug,
+                    PublicationRow.publication_year == year,
+                )
+            )
+            total = int(
+                session.scalar(
+                    select(sqla_func.count(sqla_func.distinct(PublicationSubjectCategoryRow.publication_id)))
+                    .select_from(PublicationSubjectCategoryRow)
+                    .join(
+                        PublicationRow,
+                        and_(
+                            PublicationRow.publication_id == PublicationSubjectCategoryRow.publication_id,
+                            PublicationRow.repository_id == PublicationSubjectCategoryRow.repository_id,
+                        ),
+                    )
+                    .where(
+                        PublicationSubjectCategoryRow.repository_id == repository_id,
+                        PublicationSubjectCategoryRow.category_slug == category_slug,
+                        PublicationRow.publication_year == year,
                     )
                 )
                 or 0
@@ -989,6 +1199,68 @@ class PublicationStore:
             statement = (
                 select(PublicationRow)
                 .where(PublicationRow.repository_id == repository_id, PublicationRow.publication_year == year)
+                .order_by(PublicationRow.source_publication_id.asc(), PublicationRow.publication_id.asc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            rows = session.scalars(statement).all()
+            return total, [self._to_publication(row) for row in rows]
+
+    def page_by_collection_slug_and_publication_year(
+        self,
+        collection_slug: str,
+        year: int,
+        page: int,
+        page_size: int,
+        repository_id: str = "default",
+    ) -> tuple[int, list[NormalizedPublication]]:
+        offset = (page - 1) * page_size
+        with self._session() as session:
+            total = session.scalar(
+                select(sqla_func.count()).select_from(PublicationRow).where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.publication_year == year,
+                    PublicationRow.collection_slug == collection_slug,
+                )
+            ) or 0
+            statement = (
+                select(PublicationRow)
+                .where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.publication_year == year,
+                    PublicationRow.collection_slug == collection_slug,
+                )
+                .order_by(PublicationRow.source_publication_id.asc(), PublicationRow.publication_id.asc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            rows = session.scalars(statement).all()
+            return total, [self._to_publication(row) for row in rows]
+
+    def page_by_language_and_publication_year(
+        self,
+        language: str,
+        year: int,
+        page: int,
+        page_size: int,
+        repository_id: str = "default",
+    ) -> tuple[int, list[NormalizedPublication]]:
+        offset = (page - 1) * page_size
+        with self._session() as session:
+            total = session.scalar(
+                select(sqla_func.count()).select_from(PublicationRow).where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.publication_year == year,
+                    PublicationRow.language == language,
+                )
+            ) or 0
+            statement = (
+                select(PublicationRow)
+                .where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.publication_year == year,
+                    PublicationRow.language == language,
+                )
                 .order_by(PublicationRow.source_publication_id.asc(), PublicationRow.publication_id.asc())
                 .offset(offset)
                 .limit(page_size)
