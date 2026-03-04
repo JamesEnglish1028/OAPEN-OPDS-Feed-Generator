@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, String, Text, and_, create_engine, func as sqla_func, or_, select
+from sqlalchemy import Boolean, DateTime, Index, String, Text, and_, create_engine, func as sqla_func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql import func
@@ -123,6 +123,9 @@ class PublicationSubjectRow(Base):
 
 class PublicationSubjectCategoryRow(Base):
     __tablename__ = "publication_subject_categories"
+    __table_args__ = (
+        Index("ix_publication_subject_categories_repository_slug", "repository_id", "category_slug"),
+    )
 
     publication_id: Mapped[str] = mapped_column(String(512), primary_key=True)
     repository_id: Mapped[str] = mapped_column(String(128), primary_key=True)

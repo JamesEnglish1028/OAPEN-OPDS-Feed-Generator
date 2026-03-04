@@ -1714,6 +1714,7 @@ def startup() -> None:
     try:
         database_url = os.getenv("DATABASE_URL", "sqlite:///./oapen_opds.db")
         run_migrations(database_url)
+        store.initialize()
         _ensure_default_repository()
         if os.getenv("SCHEDULER_ENABLED", "true").lower() == "true":
             harvest_scheduler.start()
