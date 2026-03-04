@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import uuid
@@ -30,6 +31,7 @@ DEFAULT_REPOSITORY_ID = "default"
 DEFAULT_REPOSITORY_NAME = "Default OPDS Repository"
 
 app = FastAPI(title="OAPEN OPDS Feed Generator", version="0.2.0")
+logger = logging.getLogger(__name__)
 store = PublicationStore(os.getenv("DATABASE_URL", "sqlite:///./oapen_opds.db"))
 opds_cache = OpdsCache()
 harvest_scheduler = IncrementalHarvestScheduler(
@@ -1709,11 +1711,15 @@ def health() -> dict:
 
 @app.on_event("startup")
 def startup() -> None:
-    database_url = os.getenv("DATABASE_URL", "sqlite:///./oapen_opds.db")
-    run_migrations(database_url)
-    _ensure_default_repository()
-    if os.getenv("SCHEDULER_ENABLED", "true").lower() == "true":
-        harvest_scheduler.start()
+    try:
+        database_url = os.getenv("DATABASE_URL", "sqlite:///./oapen_opds.db")
+        run_migrations(database_url)
+        _ensure_default_repository()
+        if os.getenv("SCHEDULER_ENABLED", "true").lower() == "true":
+            harvest_scheduler.start()
+    except Exception:
+        logger.exception("Application startup failed")
+        raise
 
 
 @app.on_event("shutdown")
