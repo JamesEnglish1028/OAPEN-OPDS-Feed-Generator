@@ -10,6 +10,49 @@ import ijson
 import requests
 
 
+def _first_text(*values: Any) -> str | None:
+    for value in values:
+        if isinstance(value, str):
+            candidate = value.strip()
+            if candidate:
+                return candidate
+    return None
+
+
+def _group_collection_name(group: dict[str, Any]) -> str | None:
+    metadata = group.get("metadata") if isinstance(group.get("metadata"), dict) else {}
+    return _first_text(
+        group.get("title"),
+        group.get("name"),
+        group.get("label"),
+        metadata.get("title"),
+        metadata.get("name"),
+        metadata.get("label"),
+    )
+
+
+def _with_group_collection(record: dict[str, Any], collection_name: str | None) -> dict[str, Any]:
+    if not collection_name:
+        return record
+    metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    belongs_to = metadata.get("belongsTo") if isinstance(metadata.get("belongsTo"), dict) else {}
+    existing_collection = belongs_to.get("collection")
+    if isinstance(existing_collection, str) and existing_collection.strip():
+        return record
+    if isinstance(existing_collection, dict):
+        existing_name = existing_collection.get("name") or existing_collection.get("title")
+        if isinstance(existing_name, str) and existing_name.strip():
+            return record
+
+    enriched = dict(record)
+    enriched_metadata = dict(metadata)
+    enriched_belongs_to = dict(belongs_to)
+    enriched_belongs_to["collection"] = collection_name
+    enriched_metadata["belongsTo"] = enriched_belongs_to
+    enriched["metadata"] = enriched_metadata
+    return enriched
+
+
 def _extract_records(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         return [item for item in payload if isinstance(item, dict)]
@@ -24,10 +67,15 @@ def _extract_records(payload: Any) -> list[dict[str, Any]]:
             for group in groups:
                 if not isinstance(group, dict):
                     continue
+                collection_name = _group_collection_name(group)
                 for key in ("publications", "items"):
                     value = group.get(key)
                     if isinstance(value, list):
-                        group_records.extend(item for item in value if isinstance(item, dict))
+                        group_records.extend(
+                            _with_group_collection(item, collection_name)
+                            for item in value
+                            if isinstance(item, dict)
+                        )
             if group_records:
                 return group_records
     return []
