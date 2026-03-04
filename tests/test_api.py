@@ -49,7 +49,8 @@ def test_ingest_json_and_opds_pagination() -> None:
     assert "navigation" in page_1_json
     assert "facets" in page_1_json
     assert page_1_json["facets"][0]["metadata"]["title"] == "Language"
-    assert any(facet["metadata"]["title"] == "Collection" for facet in page_1_json["facets"])
+    assert any(facet["metadata"]["title"] == "Collections" for facet in page_1_json["facets"])
+    assert any(facet["metadata"]["title"] == "Classifications" for facet in page_1_json["facets"])
     assert page_1_json["navigation"][0]["href"].endswith("/opds/years/2026")
     assert page_1_json["navigation"][0]["title"] == "Publication Year: 2026"
     assert any(
@@ -258,7 +259,8 @@ def test_collection_and_language_subfeeds() -> None:
     assert language_json["metadata"]["numberOfItems"] == 3
     assert "facets" in language_json
     assert language_json["facets"][0]["metadata"]["title"] == "Language"
-    assert any(facet["metadata"]["title"] == "Collection" for facet in language_json["facets"])
+    assert any(facet["metadata"]["title"] == "Collections" for facet in language_json["facets"])
+    assert any(facet["metadata"]["title"] == "Classifications" for facet in language_json["facets"])
     assert any(link["rel"] == "start" for link in language_json["links"])
     assert any(link["rel"] == "up" for link in language_json["links"])
 
@@ -270,7 +272,8 @@ def test_collection_and_language_subfeeds() -> None:
     assert "facets" in year_json
     assert year_json["facets"][0]["metadata"]["title"] == "Language"
     assert len(year_json["facets"][0]["links"]) >= 1
-    assert any(facet["metadata"]["title"] == "Collection" for facet in year_json["facets"])
+    assert any(facet["metadata"]["title"] == "Collections" for facet in year_json["facets"])
+    assert any(facet["metadata"]["title"] == "Classifications" for facet in year_json["facets"])
     assert any(link["rel"] == "start" for link in year_json["links"])
     assert any(link["rel"] == "up" for link in year_json["links"])
 
@@ -278,6 +281,12 @@ def test_collection_and_language_subfeeds() -> None:
     assert publisher_feed.status_code == 200
     publisher_json = publisher_feed.json()
     assert publisher_json["metadata"]["numberOfItems"] == 3
+
+    classification_feed = client.get("/opds/classifications/education?page=1&page_size=10")
+    assert classification_feed.status_code == 200
+    classification_json = classification_feed.json()
+    assert classification_json["metadata"]["numberOfItems"] == 1
+    assert classification_json["publications"][0]["metadata"]["title"] == "Open Access Book Three"
 
 
 def test_opds_search_endpoint() -> None:

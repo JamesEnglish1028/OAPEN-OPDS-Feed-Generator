@@ -136,15 +136,6 @@ def _publication_matches_domain(publication, domain: str) -> bool:
     return False
 
 
-def _publication_matches_identifier_prefix(publication, prefix: str) -> bool:
-    if not isinstance(publication.identifier, str):
-        return False
-    identifier = publication.identifier.strip()
-    if not identifier:
-        return False
-    return identifier.casefold().startswith(prefix.casefold())
-
-
 ingest_jobs: dict[str, dict] = {}
 ingest_jobs_lock = threading.Lock()
 
@@ -693,6 +684,12 @@ def _language_path_prefix(repository_id: str) -> str:
     return f"/repositories/{repository_id}/opds/languages"
 
 
+def _classification_path_prefix(repository_id: str) -> str:
+    if repository_id == DEFAULT_REPOSITORY_ID:
+        return "/opds/classifications"
+    return f"/repositories/{repository_id}/opds/classifications"
+
+
 def _attach_language_facets(request: Request, response: dict, language_counts: list[dict[str, str | int]], repository_id: str) -> dict:
     links = response.setdefault("links", [])
     is_default_repository = repository_id == DEFAULT_REPOSITORY_ID
@@ -727,10 +724,8 @@ def _attach_language_facets(request: Request, response: dict, language_counts: l
 def _attach_browse_facets(request: Request, response: dict, repository_id: str) -> dict:
     if repository_id == DEFAULT_REPOSITORY_ID:
         collection_prefix = "/opds/collections"
-        series_prefix = "/opds/series"
     else:
         collection_prefix = f"/repositories/{repository_id}/opds/collections"
-        series_prefix = f"/repositories/{repository_id}/opds/series"
 
     collection_links = [
         {
@@ -741,26 +736,34 @@ def _attach_browse_facets(request: Request, response: dict, repository_id: str) 
         }
         for item in store.list_collection_counts(repository_id=repository_id)
     ]
-    series_links = [
+    classification_links = [
         {
-            "href": _build_url(request, f"{series_prefix}/{item['slug']}", {}),
+            "href": _build_url(request, f"{_classification_path_prefix(repository_id)}/{item['slug']}", {}),
             "type": "application/opds+json",
-            "title": f"Series: {item['name']}",
+            "title": item["name"],
             "properties": {"numberOfItems": int(item["count"])},
         }
-        for item in store.list_series_counts(repository_id=repository_id)
+        for item in store.list_subject_counts(repository_id=repository_id)
     ]
-    browse_links = [*collection_links, *series_links]
-    if not browse_links:
+    if not collection_links and not classification_links:
         return response
     existing_facets = response.get("facets", [])
-    response["facets"] = [
-        *existing_facets,
-        {
-            "metadata": {"title": "Collection"},
-            "links": browse_links,
-        },
-    ]
+    appended_facets = []
+    if collection_links:
+        appended_facets.append(
+            {
+                "metadata": {"title": "Collections"},
+                "links": collection_links,
+            }
+        )
+    if classification_links:
+        appended_facets.append(
+            {
+                "metadata": {"title": "Classifications"},
+                "links": classification_links,
+            }
+        )
+    response["facets"] = [*existing_facets, *appended_facets]
     return response
 
 
@@ -2023,6 +2026,94 @@ def opds_collection_feed_repository(
             subset=subset,
             repository_id=repository_id,
         )
+
+    return _cached_opds_response(request, build_response, repository_id=repository_id)
+
+
+@app.get("/opds/classifications/{classification_slug}")
+def opds_classification_feed(
+    classification_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    subject_entry = next(
+        (item for item in store.list_subject_counts(repository_id=DEFAULT_REPOSITORY_ID) if item["slug"] == classification_slug),
+        None,
+    )
+    if subject_entry is None:
+        raise HTTPException(status_code=404, detail="Classification not found")
+    subject_name = str(subject_entry["name"])
+
+    def build_response() -> dict:
+        total, subset = store.search(
+            repository_id=DEFAULT_REPOSITORY_ID,
+            subject=subject_name,
+            page=page,
+            page_size=page_size,
+        )
+        response = _build_feed_response(
+            request=request,
+            title=f"Classification: {subject_name}",
+            path=f"/opds/classifications/{classification_slug}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        response = _attach_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts(repository_id=DEFAULT_REPOSITORY_ID),
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        return _attach_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID)
+
+    return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
+
+
+@app.get("/repositories/{repository_id}/opds/classifications/{classification_slug}")
+def opds_classification_feed_repository(
+    repository_id: str,
+    classification_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    _get_repository_or_404(repository_id)
+    subject_entry = next(
+        (item for item in store.list_subject_counts(repository_id=repository_id) if item["slug"] == classification_slug),
+        None,
+    )
+    if subject_entry is None:
+        raise HTTPException(status_code=404, detail="Classification not found")
+    subject_name = str(subject_entry["name"])
+
+    def build_response() -> dict:
+        total, subset = store.search(
+            repository_id=repository_id,
+            subject=subject_name,
+            page=page,
+            page_size=page_size,
+        )
+        response = _build_feed_response(
+            request=request,
+            title=f"Classification: {subject_name}",
+            path=f"/repositories/{repository_id}/opds/classifications/{classification_slug}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=repository_id,
+        )
+        response = _attach_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts(repository_id=repository_id),
+            repository_id=repository_id,
+        )
+        return _attach_browse_facets(request=request, response=response, repository_id=repository_id)
 
     return _cached_opds_response(request, build_response, repository_id=repository_id)
 

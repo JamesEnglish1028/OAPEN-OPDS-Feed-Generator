@@ -13,6 +13,19 @@ from sqlalchemy.sql import func
 from app.models import NormalizedPublication
 
 
+def _slugify_value(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = value.strip().lower()
+    if not text:
+        return None
+    slug_chars = [char if char.isalnum() else "-" for char in text]
+    slug = "".join(slug_chars).strip("-")
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    return slug or None
+
+
 @dataclass
 class IngestResult:
     accepted: int = 0
@@ -434,6 +447,34 @@ class PublicationStore:
             )
             rows = session.execute(statement).all()
             return [{"slug": slug, "name": name, "count": count} for slug, name, count in rows if slug and name]
+
+    def list_subject_counts(self, repository_id: str = "default") -> list[dict[str, str | int]]:
+        counts: dict[str, int] = {}
+        with self._session() as session:
+            statement = select(PublicationRow.subjects_json).where(PublicationRow.repository_id == repository_id)
+            for raw_subjects in session.scalars(statement):
+                try:
+                    values = json.loads(raw_subjects or "[]")
+                except json.JSONDecodeError:
+                    values = []
+                if not isinstance(values, list):
+                    continue
+                per_publication: set[str] = set()
+                for value in values:
+                    if not isinstance(value, str):
+                        continue
+                    name = value.strip()
+                    if name:
+                        per_publication.add(name)
+                for name in per_publication:
+                    counts[name] = counts.get(name, 0) + 1
+        items = [
+            {"slug": _slugify_value(name), "name": name, "count": count}
+            for name, count in counts.items()
+            if _slugify_value(name)
+        ]
+        items.sort(key=lambda item: str(item["name"]).casefold())
+        return items
 
     def list_language_counts(self, repository_id: str = "default") -> list[dict[str, str | int]]:
         with self._session() as session:
