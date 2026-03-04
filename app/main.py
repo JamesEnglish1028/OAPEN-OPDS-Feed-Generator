@@ -884,6 +884,37 @@ def admin_ui() -> str:
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
       align-items: start;
     }
+    .stack {
+      display: grid;
+      gap: 18px;
+    }
+    .section {
+      display: grid;
+      gap: 12px;
+      margin-top: 22px;
+    }
+    .section-head {
+      display: grid;
+      gap: 4px;
+    }
+    .section-kicker {
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--accent-2);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .section-title {
+      margin: 0;
+      font-size: 1.25rem;
+      font-family: Georgia, "Times New Roman", serif;
+    }
+    .section-copy {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
     .card {
       background: var(--card);
       border: 1px solid rgba(217, 203, 176, 0.75);
@@ -1067,89 +1098,114 @@ def admin_ui() -> str:
       <p class="sub">Manage repository definitions, seed new OPDS-like JSON harvests, and inspect checkpoints without posting raw JSON by hand. This wraps the same API routes the service already exposes.</p>
     </section>
 
-    <section class="grid">
-      <div class="card">
-        <h2>Repositories</h2>
-        <p class="hint">Create or update a repository. Use <code>source_type</code> <code>opds-json</code> for remote OPDS-like feeds.</p>
-        <form id="repo-form">
-          <div class="row">
-            <div>
-              <label for="repo-id">Repository ID</label>
-              <input id="repo-id" name="repository_id" placeholder="example-repo" required>
-            </div>
-            <div>
-              <label for="repo-name">Name</label>
-              <input id="repo-name" name="name" placeholder="Example Repository" required>
-            </div>
-          </div>
-          <div class="row">
-            <div>
-              <label for="repo-type">Source Type</label>
-              <select id="repo-type" name="source_type">
-                <option value="opds-json">opds-json</option>
-                <option value="json">json</option>
-                <option value="oai-pmh">oai-pmh</option>
-                <option value="mixed">mixed</option>
-              </select>
-            </div>
-            <div>
-              <label for="repo-config">Config JSON</label>
-              <textarea id="repo-config" name="config" placeholder="{}">{}</textarea>
-            </div>
-          </div>
-          <label class="check"><input id="repo-active" type="checkbox" checked> Active repository</label>
-          <div class="actions">
-            <button type="submit">Save Repository</button>
-            <button type="button" class="ghost" id="refresh-repos">Refresh List</button>
-          </div>
-        </form>
+    <section class="section">
+      <div class="section-head">
+        <div class="section-kicker">Configure</div>
+        <h2 class="section-title">Add And Seed A Repository</h2>
+        <p class="section-copy">Set the repository definition and run the initial harvest from the same dedicated workspace.</p>
       </div>
+      <div class="grid">
+        <div class="card">
+          <h2>Repository Configuration</h2>
+          <p class="hint">Create or update a repository. Use <code>source_type</code> <code>opds-json</code> for remote OPDS-like feeds.</p>
+          <form id="repo-form">
+            <div class="row">
+              <div>
+                <label for="repo-id">Repository ID</label>
+                <input id="repo-id" name="repository_id" placeholder="example-repo" required>
+              </div>
+              <div>
+                <label for="repo-name">Name</label>
+                <input id="repo-name" name="name" placeholder="Example Repository" required>
+              </div>
+            </div>
+            <div class="row">
+              <div>
+                <label for="repo-type">Source Type</label>
+                <select id="repo-type" name="source_type">
+                  <option value="opds-json">opds-json</option>
+                  <option value="json">json</option>
+                  <option value="oai-pmh">oai-pmh</option>
+                  <option value="mixed">mixed</option>
+                </select>
+              </div>
+              <div>
+                <label for="repo-config">Config JSON</label>
+                <textarea id="repo-config" name="config" placeholder="{}">{}</textarea>
+              </div>
+            </div>
+            <label class="check"><input id="repo-active" type="checkbox" checked> Active repository</label>
+            <div class="actions">
+              <button type="submit">Save Repository</button>
+              <button type="button" class="ghost" id="refresh-repos">Refresh List</button>
+            </div>
+          </form>
+        </div>
 
-      <div class="card">
-        <h2>Harvest OPDS-Like JSON</h2>
-        <p class="hint">Seed a repository from a remote OPDS feed. This saves a checkpoint so later <code>/harvest/run</code> and the daily scheduler continue from <code>next_url</code>.</p>
-        <form id="harvest-form">
-          <div>
-            <label for="harvest-repo">Repository</label>
-            <select id="harvest-repo" name="repository_id"></select>
-          </div>
-          <div>
-            <label for="harvest-url">Remote Feed URL</label>
-            <input id="harvest-url" name="url" type="url" placeholder="https://example.org/catalog.json" required>
-          </div>
-          <div class="row-3">
+        <div class="card">
+          <h2>Harvest OPDS-Like JSON</h2>
+          <p class="hint">Seed a repository from a remote OPDS feed. This saves a checkpoint so later <code>/harvest/run</code> and the daily scheduler continue from <code>next_url</code>.</p>
+          <form id="harvest-form">
             <div>
-              <label for="harvest-max-pages">Max Pages</label>
-              <input id="harvest-max-pages" name="max_pages" type="number" min="1" placeholder="5">
+              <label for="harvest-repo">Repository</label>
+              <select id="harvest-repo" name="repository_id"></select>
             </div>
             <div>
-              <label for="harvest-max-records">Max Records</label>
-              <input id="harvest-max-records" name="max_records" type="number" min="1" placeholder="250">
+              <label for="harvest-url">Remote Feed URL</label>
+              <input id="harvest-url" name="url" type="url" placeholder="https://example.org/catalog.json" required>
             </div>
-            <div>
-              <label for="harvest-timeout">Timeout (s)</label>
-              <input id="harvest-timeout" name="timeout_seconds" type="number" min="1" max="600" value="120">
+            <div class="row-3">
+              <div>
+                <label for="harvest-max-pages">Max Pages</label>
+                <input id="harvest-max-pages" name="max_pages" type="number" min="1" placeholder="5">
+              </div>
+              <div>
+                <label for="harvest-max-records">Max Records</label>
+                <input id="harvest-max-records" name="max_records" type="number" min="1" placeholder="250">
+              </div>
+              <div>
+                <label for="harvest-timeout">Timeout (s)</label>
+                <input id="harvest-timeout" name="timeout_seconds" type="number" min="1" max="600" value="120">
+              </div>
             </div>
-          </div>
-          <label class="check"><input id="harvest-follow-next" type="checkbox" checked> Follow <code>rel: next</code> links</label>
-          <label class="check"><input id="harvest-incremental" type="checkbox" checked> Persist checkpoint for scheduled harvests</label>
-          <div class="actions">
-            <button type="submit" class="secondary">Start Harvest</button>
-            <button type="button" class="ghost" id="load-checkpoints">Load Checkpoints</button>
-          </div>
-        </form>
+            <label class="check"><input id="harvest-follow-next" type="checkbox" checked> Follow <code>rel: next</code> links</label>
+            <label class="check"><input id="harvest-incremental" type="checkbox" checked> Persist checkpoint for scheduled harvests</label>
+            <div class="actions">
+              <button type="submit" class="secondary">Start Harvest</button>
+              <button type="button" class="ghost" id="load-checkpoints">Load Checkpoints</button>
+            </div>
+          </form>
+        </div>
       </div>
+    </section>
 
-      <div class="card">
-        <h2>Known Repositories</h2>
-        <p id="repo-summary" class="summary">Loading repositories...</p>
-        <p class="hint">Use <strong>Backfill Classifications</strong> to populate subject-based facets for existing records in small batches after the schema-only subject index migration.</p>
-        <div id="repo-list" class="list"></div>
+    <section class="section">
+      <div class="section-head">
+        <div class="section-kicker">Manage</div>
+        <h2 class="section-title">Manage Repositories</h2>
+        <p class="section-copy">Inspect repository state, open feeds, backfill classifications, clear harvested data, or remove non-default repositories.</p>
       </div>
+      <div class="stack">
+        <div class="card">
+          <h2>Known Repositories</h2>
+          <p id="repo-summary" class="summary">Loading repositories...</p>
+          <p class="hint">Use <strong>Backfill Classifications</strong> to populate subject-based facets for existing records in small batches after the schema-only subject index migration.</p>
+          <div id="repo-list" class="list"></div>
+        </div>
+      </div>
+    </section>
 
-      <div class="card">
-        <h2>Output</h2>
-        <pre id="output">Ready.</pre>
+    <section class="section">
+      <div class="section-head">
+        <div class="section-kicker">Output</div>
+        <h2 class="section-title">Request Output</h2>
+        <p class="section-copy">All API responses from configuration, harvest, and management actions are shown here.</p>
+      </div>
+      <div class="stack">
+        <div class="card">
+          <h2>Output</h2>
+          <pre id="output">Ready.</pre>
+        </div>
       </div>
     </section>
   </div>
