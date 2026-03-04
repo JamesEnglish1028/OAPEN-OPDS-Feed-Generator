@@ -101,6 +101,15 @@ class PublicationRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class PublicationSubjectRow(Base):
+    __tablename__ = "publication_subjects"
+
+    publication_id: Mapped[str] = mapped_column(String(512), primary_key=True)
+    repository_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    subject_slug: Mapped[str] = mapped_column(String(512), primary_key=True)
+    subject_name: Mapped[str] = mapped_column(String(512), nullable=False)
+
+
 class HarvestCheckpointRow(Base):
     __tablename__ = "harvest_checkpoints"
 
@@ -188,6 +197,20 @@ class PublicationStore:
         repository_id = pub.repository_id or "default"
         source_publication_id = pub.source_publication_id or pub.publication_id
         storage_publication_id = self._storage_publication_id(repository_id, source_publication_id)
+        normalized_subjects = []
+        seen_subjects: set[tuple[str, str]] = set()
+        for subject in pub.subjects:
+            if not isinstance(subject, str):
+                continue
+            subject_name = subject.strip()
+            subject_slug = _slugify_value(subject_name)
+            if not subject_name or not subject_slug:
+                continue
+            key = (subject_slug, subject_name)
+            if key in seen_subjects:
+                continue
+            seen_subjects.add(key)
+            normalized_subjects.append({"subject_slug": subject_slug, "subject_name": subject_name})
         payload = {
             "publication_id": storage_publication_id,
             "repository_id": repository_id,
@@ -226,6 +249,24 @@ class PublicationStore:
                 else:
                     for key, value in payload.items():
                         setattr(existing, key, value)
+                session.execute(
+                    PublicationSubjectRow.__table__.delete().where(
+                        PublicationSubjectRow.repository_id == repository_id,
+                        PublicationSubjectRow.publication_id == storage_publication_id,
+                    )
+                )
+                if normalized_subjects:
+                    session.add_all(
+                        [
+                            PublicationSubjectRow(
+                                publication_id=storage_publication_id,
+                                repository_id=repository_id,
+                                subject_slug=item["subject_slug"],
+                                subject_name=item["subject_name"],
+                            )
+                            for item in normalized_subjects
+                        ]
+                    )
             session.commit()
 
     def get(self, publication_id: str, repository_id: str = "default") -> NormalizedPublication | None:
@@ -449,32 +490,60 @@ class PublicationStore:
             return [{"slug": slug, "name": name, "count": count} for slug, name, count in rows if slug and name]
 
     def list_subject_counts(self, repository_id: str = "default") -> list[dict[str, str | int]]:
-        counts: dict[str, int] = {}
         with self._session() as session:
-            statement = select(PublicationRow.subjects_json).where(PublicationRow.repository_id == repository_id)
-            for raw_subjects in session.scalars(statement):
-                try:
-                    values = json.loads(raw_subjects or "[]")
-                except json.JSONDecodeError:
-                    values = []
-                if not isinstance(values, list):
-                    continue
-                per_publication: set[str] = set()
-                for value in values:
-                    if not isinstance(value, str):
-                        continue
-                    name = value.strip()
-                    if name:
-                        per_publication.add(name)
-                for name in per_publication:
-                    counts[name] = counts.get(name, 0) + 1
-        items = [
-            {"slug": _slugify_value(name), "name": name, "count": count}
-            for name, count in counts.items()
-            if _slugify_value(name)
-        ]
-        items.sort(key=lambda item: str(item["name"]).casefold())
-        return items
+            statement = (
+                select(
+                    PublicationSubjectRow.subject_slug,
+                    PublicationSubjectRow.subject_name,
+                    sqla_func.count(PublicationSubjectRow.publication_id),
+                )
+                .where(PublicationSubjectRow.repository_id == repository_id)
+                .group_by(PublicationSubjectRow.subject_slug, PublicationSubjectRow.subject_name)
+                .order_by(PublicationSubjectRow.subject_name.asc())
+            )
+            rows = session.execute(statement).all()
+            return [
+                {"slug": slug, "name": name, "count": count}
+                for slug, name, count in rows
+                if isinstance(slug, str) and slug and isinstance(name, str) and name
+            ]
+
+    def page_by_subject_slug(
+        self,
+        subject_slug: str,
+        page: int,
+        page_size: int,
+        repository_id: str = "default",
+    ) -> tuple[int, list[NormalizedPublication]]:
+        offset = (page - 1) * page_size
+        with self._session() as session:
+            total = session.scalar(
+                select(sqla_func.count())
+                .select_from(PublicationSubjectRow)
+                .where(
+                    PublicationSubjectRow.repository_id == repository_id,
+                    PublicationSubjectRow.subject_slug == subject_slug,
+                )
+            ) or 0
+            statement = (
+                select(PublicationRow)
+                .join(
+                    PublicationSubjectRow,
+                    and_(
+                        PublicationSubjectRow.publication_id == PublicationRow.publication_id,
+                        PublicationSubjectRow.repository_id == PublicationRow.repository_id,
+                    ),
+                )
+                .where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationSubjectRow.subject_slug == subject_slug,
+                )
+                .order_by(PublicationRow.source_publication_id.asc(), PublicationRow.publication_id.asc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            rows = session.scalars(statement).all()
+            return total, [self._to_publication(row) for row in rows]
 
     def list_language_counts(self, repository_id: str = "default") -> list[dict[str, str | int]]:
         with self._session() as session:
@@ -549,9 +618,12 @@ class PublicationStore:
 
     def clear(self, repository_id: str | None = None) -> None:
         with self._session() as session:
+            subject_statement = PublicationSubjectRow.__table__.delete()
             statement = PublicationRow.__table__.delete()
             if repository_id is not None:
+                subject_statement = subject_statement.where(PublicationSubjectRow.repository_id == repository_id)
                 statement = statement.where(PublicationRow.repository_id == repository_id)
+            session.execute(subject_statement)
             session.execute(statement)
             session.commit()
 
@@ -560,6 +632,12 @@ class PublicationStore:
             return 0
         storage_ids = [self._storage_publication_id(repository_id, publication_id) for publication_id in publication_ids]
         with self._session() as session:
+            session.execute(
+                PublicationSubjectRow.__table__.delete().where(
+                    PublicationSubjectRow.repository_id == repository_id,
+                    PublicationSubjectRow.publication_id.in_(storage_ids),
+                )
+            )
             statement = PublicationRow.__table__.delete().where(
                 PublicationRow.repository_id == repository_id,
                 PublicationRow.publication_id.in_(storage_ids),
@@ -608,6 +686,20 @@ class PublicationStore:
     def delete_publications_by_identifier_prefix(self, prefix: str, repository_id: str = "default") -> int:
         normalized_prefix = prefix.casefold()
         with self._session() as session:
+            matching_publication_ids = (
+                select(PublicationRow.publication_id)
+                .where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.identifier.is_not(None),
+                    sqla_func.lower(PublicationRow.identifier).like(f"{normalized_prefix}%"),
+                )
+            )
+            session.execute(
+                PublicationSubjectRow.__table__.delete().where(
+                    PublicationSubjectRow.repository_id == repository_id,
+                    PublicationSubjectRow.publication_id.in_(matching_publication_ids),
+                )
+            )
             statement = PublicationRow.__table__.delete().where(
                 PublicationRow.repository_id == repository_id,
                 PublicationRow.identifier.is_not(None),

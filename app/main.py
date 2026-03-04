@@ -2046,11 +2046,11 @@ def opds_classification_feed(
     subject_name = str(subject_entry["name"])
 
     def build_response() -> dict:
-        total, subset = store.search(
-            repository_id=DEFAULT_REPOSITORY_ID,
-            subject=subject_name,
+        total, subset = store.page_by_subject_slug(
+            subject_slug=classification_slug,
             page=page,
             page_size=page_size,
+            repository_id=DEFAULT_REPOSITORY_ID,
         )
         response = _build_feed_response(
             request=request,
@@ -2091,11 +2091,11 @@ def opds_classification_feed_repository(
     subject_name = str(subject_entry["name"])
 
     def build_response() -> dict:
-        total, subset = store.search(
-            repository_id=repository_id,
-            subject=subject_name,
+        total, subset = store.page_by_subject_slug(
+            subject_slug=classification_slug,
             page=page,
             page_size=page_size,
+            repository_id=repository_id,
         )
         response = _build_feed_response(
             request=request,

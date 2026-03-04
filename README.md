@@ -234,6 +234,7 @@ Or run the local pre-push check wrapper:
 
 - Initial schema migration is in `alembic/versions/0001_initial_schema.py`.
 - Apply latest schema changes with `alembic upgrade head`.
+- Latest releases include subject indexing for classification facets, so production deploys should run the newest migration before expecting `Classifications` facets to populate correctly.
 - Generate a new migration after model updates:
 
 ```bash
