@@ -2561,14 +2561,22 @@ def _opds_feed_for_repository(
         else:
             year_path_prefix = f"/repositories/{repository_id}/opds/years"
 
-        response["navigation"] = [
+        year_navigation_links = [
             {
                 "href": _build_url(request, f"{year_path_prefix}/{item['year']}", {}),
-                "title": f"Publication Year: {item['year']}",
+                "title": str(item["year"]),
                 "type": "application/opds+json",
                 "rel": "subsection",
+                "properties": {"numberOfItems": int(item["count"])},
             }
             for item in year_counts
+        ]
+        response["navigation"] = year_navigation_links
+        response["groups"] = [
+            {
+                "metadata": {"title": "Publication Year"},
+                "navigation": year_navigation_links,
+            }
         ]
         response = _attach_language_facets(request=request, response=response, language_counts=languages, repository_id=repository_id)
         return _attach_browse_facets(request=request, response=response, repository_id=repository_id)
