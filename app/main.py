@@ -1160,36 +1160,47 @@ def _attach_subclassification_facets(
     category_slug: str,
     year: int | None = None,
 ) -> dict:
-    total_subjects = (
-        store.count_subject_facets_for_category_by_publication_year(
-            category_slug=category_slug,
-            year=year,
-            repository_id=repository_id,
-            min_count=1,
+    try:
+        total_subjects = (
+            store.count_subject_facets_for_category_by_publication_year(
+                category_slug=category_slug,
+                year=year,
+                repository_id=repository_id,
+                min_count=1,
+            )
+            if year is not None
+            else store.count_subject_facets_for_category(category_slug, repository_id=repository_id, min_count=1)
         )
-        if year is not None
-        else store.count_subject_facets_for_category(category_slug, repository_id=repository_id, min_count=1)
-    )
-    subject_items = (
-        store.list_subject_counts_for_category_by_publication_year(
-            category_slug=category_slug,
-            year=year,
-            repository_id=repository_id,
-            min_count=1,
-            limit=SUBCLASSIFICATION_FACET_LINK_LIMIT,
-            offset=0,
-            order_by_count_desc=True,
+        subject_items = (
+            store.list_subject_counts_for_category_by_publication_year(
+                category_slug=category_slug,
+                year=year,
+                repository_id=repository_id,
+                min_count=1,
+                limit=SUBCLASSIFICATION_FACET_LINK_LIMIT,
+                offset=0,
+                order_by_count_desc=True,
+            )
+            if year is not None
+            else store.list_subject_counts_for_category(
+                category_slug=category_slug,
+                repository_id=repository_id,
+                min_count=1,
+                limit=SUBCLASSIFICATION_FACET_LINK_LIMIT,
+                offset=0,
+                order_by_count_desc=True,
+            )
         )
-        if year is not None
-        else store.list_subject_counts_for_category(
-            category_slug=category_slug,
-            repository_id=repository_id,
-            min_count=1,
-            limit=SUBCLASSIFICATION_FACET_LINK_LIMIT,
-            offset=0,
-            order_by_count_desc=True,
+    except Exception:
+        logger.exception(
+            "Failed to attach sub-classifications",
+            extra={
+                "repository_id": repository_id,
+                "category_slug": category_slug,
+                "year": year,
+            },
         )
-    )
+        return response
     path_prefix = (
         f"{_year_path_prefix(repository_id, year)}/classifications/{category_slug}"
         if year is not None
