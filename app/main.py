@@ -93,6 +93,11 @@ class CleanupByIdentifierPrefixRequest(BaseModel):
     dry_run: bool = False
 
 
+class SubjectBackfillRequest(BaseModel):
+    batch_size: int = Field(default=500, ge=1, le=5000)
+    start_after: str | None = None
+
+
 def _as_list(value):
     if value is None:
         return []
@@ -1512,6 +1517,28 @@ def cleanup_repository_by_identifier_prefix(repository_id: str, request: Cleanup
         "removed_publications": removed,
         "remaining_publications": store.count(repository_id=repository_id),
         "matched_ids": matched_publications[:100],
+    }
+
+
+@app.post("/repositories/{repository_id}/backfill/subjects")
+def backfill_repository_subjects(repository_id: str, request: SubjectBackfillRequest) -> dict:
+    repository = _get_repository_or_404(repository_id)
+    result = store.backfill_publication_subjects(
+        repository_id=repository_id,
+        batch_size=request.batch_size,
+        start_after=request.start_after,
+    )
+    if result.processed_publications:
+        _invalidate_opds_cache(repository_id)
+    return {
+        "repository_id": repository_id,
+        "repository_name": repository.name,
+        "processed_publications": result.processed_publications,
+        "indexed_subject_rows": result.indexed_subject_rows,
+        "next_cursor": result.next_cursor,
+        "has_more": result.has_more,
+        "batch_size": request.batch_size,
+        "total_publications": store.count(repository_id=repository_id),
     }
 
 

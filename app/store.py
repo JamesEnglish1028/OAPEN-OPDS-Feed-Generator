@@ -58,6 +58,14 @@ class HarvestCheckpoint:
     updated_at: str
 
 
+@dataclass
+class SubjectBackfillResult:
+    processed_publications: int
+    indexed_subject_rows: int
+    next_cursor: str | None
+    has_more: bool
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -143,6 +151,51 @@ class PublicationStore:
     def _session(self) -> Session:
         return Session(self._engine)
 
+    @staticmethod
+    def _normalized_subject_rows(subjects: list[Any]) -> list[dict[str, str]]:
+        normalized_subjects = []
+        seen_subjects: set[tuple[str, str]] = set()
+        for subject in subjects:
+            if not isinstance(subject, str):
+                continue
+            subject_name = subject.strip()
+            subject_slug = _slugify_value(subject_name)
+            if not subject_name or not subject_slug:
+                continue
+            key = (subject_slug, subject_name)
+            if key in seen_subjects:
+                continue
+            seen_subjects.add(key)
+            normalized_subjects.append({"subject_slug": subject_slug, "subject_name": subject_name})
+        return normalized_subjects
+
+    @staticmethod
+    def _replace_publication_subjects(
+        session: Session,
+        *,
+        repository_id: str,
+        publication_id: str,
+        normalized_subjects: list[dict[str, str]],
+    ) -> None:
+        session.execute(
+            PublicationSubjectRow.__table__.delete().where(
+                PublicationSubjectRow.repository_id == repository_id,
+                PublicationSubjectRow.publication_id == publication_id,
+            )
+        )
+        if normalized_subjects:
+            session.add_all(
+                [
+                    PublicationSubjectRow(
+                        publication_id=publication_id,
+                        repository_id=repository_id,
+                        subject_slug=item["subject_slug"],
+                        subject_name=item["subject_name"],
+                    )
+                    for item in normalized_subjects
+                ]
+            )
+
     def upsert_repository(self, repository: RepositoryConfig) -> None:
         payload = {
             "repository_id": repository.repository_id,
@@ -197,20 +250,7 @@ class PublicationStore:
         repository_id = pub.repository_id or "default"
         source_publication_id = pub.source_publication_id or pub.publication_id
         storage_publication_id = self._storage_publication_id(repository_id, source_publication_id)
-        normalized_subjects = []
-        seen_subjects: set[tuple[str, str]] = set()
-        for subject in pub.subjects:
-            if not isinstance(subject, str):
-                continue
-            subject_name = subject.strip()
-            subject_slug = _slugify_value(subject_name)
-            if not subject_name or not subject_slug:
-                continue
-            key = (subject_slug, subject_name)
-            if key in seen_subjects:
-                continue
-            seen_subjects.add(key)
-            normalized_subjects.append({"subject_slug": subject_slug, "subject_name": subject_name})
+        normalized_subjects = self._normalized_subject_rows(pub.subjects)
         payload = {
             "publication_id": storage_publication_id,
             "repository_id": repository_id,
@@ -249,25 +289,59 @@ class PublicationStore:
                 else:
                     for key, value in payload.items():
                         setattr(existing, key, value)
-                session.execute(
-                    PublicationSubjectRow.__table__.delete().where(
-                        PublicationSubjectRow.repository_id == repository_id,
-                        PublicationSubjectRow.publication_id == storage_publication_id,
-                    )
-                )
-                if normalized_subjects:
-                    session.add_all(
-                        [
-                            PublicationSubjectRow(
-                                publication_id=storage_publication_id,
-                                repository_id=repository_id,
-                                subject_slug=item["subject_slug"],
-                                subject_name=item["subject_name"],
-                            )
-                            for item in normalized_subjects
-                        ]
-                    )
+            self._replace_publication_subjects(
+                session,
+                repository_id=repository_id,
+                publication_id=storage_publication_id,
+                normalized_subjects=normalized_subjects,
+            )
             session.commit()
+
+    def backfill_publication_subjects(
+        self,
+        repository_id: str = "default",
+        *,
+        batch_size: int = 500,
+        start_after: str | None = None,
+    ) -> SubjectBackfillResult:
+        limit = max(1, min(batch_size, 5000))
+        with self._session() as session:
+            statement = (
+                select(PublicationRow.publication_id, PublicationRow.subjects_json)
+                .where(PublicationRow.repository_id == repository_id)
+                .order_by(PublicationRow.publication_id.asc())
+            )
+            if start_after:
+                statement = statement.where(PublicationRow.publication_id > start_after)
+            rows = session.execute(statement.limit(limit + 1)).all()
+            has_more = len(rows) > limit
+            work_rows = rows[:limit]
+            processed_publications = 0
+            indexed_subject_rows = 0
+            next_cursor = None
+            for publication_id, subjects_json in work_rows:
+                try:
+                    raw_subjects = json.loads(subjects_json or "[]")
+                except json.JSONDecodeError:
+                    raw_subjects = []
+                subjects = raw_subjects if isinstance(raw_subjects, list) else []
+                normalized_subjects = self._normalized_subject_rows(subjects)
+                self._replace_publication_subjects(
+                    session,
+                    repository_id=repository_id,
+                    publication_id=publication_id,
+                    normalized_subjects=normalized_subjects,
+                )
+                processed_publications += 1
+                indexed_subject_rows += len(normalized_subjects)
+                next_cursor = publication_id
+            session.commit()
+            return SubjectBackfillResult(
+                processed_publications=processed_publications,
+                indexed_subject_rows=indexed_subject_rows,
+                next_cursor=next_cursor,
+                has_more=has_more,
+            )
 
     def get(self, publication_id: str, repository_id: str = "default") -> NormalizedPublication | None:
         storage_publication_id = self._storage_publication_id(repository_id, publication_id)
