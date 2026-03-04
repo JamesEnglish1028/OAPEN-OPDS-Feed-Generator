@@ -259,7 +259,7 @@ class PublicationStore:
     @staticmethod
     def _normalized_subject_rows(subjects: list[Any]) -> list[dict[str, str]]:
         normalized_subjects = []
-        seen_subjects: set[tuple[str, str]] = set()
+        seen_subject_slugs: set[str] = set()
         for subject in subjects:
             if not isinstance(subject, str):
                 continue
@@ -267,10 +267,9 @@ class PublicationStore:
             subject_slug = _slugify_value(subject_name)
             if not subject_name or not subject_slug:
                 continue
-            key = (subject_slug, subject_name)
-            if key in seen_subjects:
+            if subject_slug in seen_subject_slugs:
                 continue
-            seen_subjects.add(key)
+            seen_subject_slugs.add(subject_slug)
             normalized_subjects.append({"subject_slug": subject_slug, "subject_name": subject_name})
         return normalized_subjects
 
@@ -482,30 +481,30 @@ class PublicationStore:
             for publication_id, subjects_json in work_rows:
                 next_cursor = publication_id
                 try:
-                    try:
-                        raw_subjects = json.loads(subjects_json or "[]")
-                    except json.JSONDecodeError:
-                        raw_subjects = []
-                    subjects = raw_subjects if isinstance(raw_subjects, list) else []
-                    normalized_subjects = self._normalized_subject_rows(subjects)
-                    normalized_categories = self._normalized_category_rows(normalized_subjects)
-                    self._replace_publication_subjects(
-                        session,
-                        repository_id=repository_id,
-                        publication_id=publication_id,
-                        normalized_subjects=normalized_subjects,
-                    )
-                    self._replace_publication_subject_categories(
-                        session,
-                        repository_id=repository_id,
-                        publication_id=publication_id,
-                        normalized_categories=normalized_categories,
-                    )
-                    session.flush()
+                    with session.begin_nested():
+                        try:
+                            raw_subjects = json.loads(subjects_json or "[]")
+                        except json.JSONDecodeError:
+                            raw_subjects = []
+                        subjects = raw_subjects if isinstance(raw_subjects, list) else []
+                        normalized_subjects = self._normalized_subject_rows(subjects)
+                        normalized_categories = self._normalized_category_rows(normalized_subjects)
+                        self._replace_publication_subjects(
+                            session,
+                            repository_id=repository_id,
+                            publication_id=publication_id,
+                            normalized_subjects=normalized_subjects,
+                        )
+                        self._replace_publication_subject_categories(
+                            session,
+                            repository_id=repository_id,
+                            publication_id=publication_id,
+                            normalized_categories=normalized_categories,
+                        )
+                        session.flush()
                     processed_publications += 1
                     indexed_subject_rows += len(normalized_subjects)
                 except Exception as exc:
-                    session.rollback()
                     skipped_publications += 1
                     if len(error_examples) < 10:
                         error_examples.append(
