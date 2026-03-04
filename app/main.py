@@ -797,6 +797,8 @@ def _get_repository_or_404(repository_id: str) -> RepositoryConfig:
 
 
 def _repository_source_domain(repository: RepositoryConfig, checkpoints) -> str | None:
+    if repository.repository_id == DEFAULT_REPOSITORY_ID:
+        return "oapen.org"
     config = repository.config if isinstance(repository.config, dict) else {}
     candidate_url = None
     for key in ("url", "base_url", "feed_url", "endpoint"):
@@ -812,8 +814,6 @@ def _repository_source_domain(repository: RepositoryConfig, checkpoints) -> str 
         parsed = urlparse(candidate_url)
         if parsed.netloc:
             return parsed.netloc
-    if repository.repository_id == DEFAULT_REPOSITORY_ID:
-        return "oapen.org"
     return None
 
 
@@ -1288,7 +1288,7 @@ def admin_ui() -> str:
       const data = await readJson(response);
       show(data);
       if (response.ok) {
-        await loadRepositories(repositoryId);
+        await loadRepositories(repositoryId, { silent: true });
       }
     }
 
@@ -1301,7 +1301,8 @@ def admin_ui() -> str:
       repoSelect.value = repo.repository_id;
     }
 
-    async function loadRepositories(preferredRepositoryId) {
+    async function loadRepositories(preferredRepositoryId, options) {
+      const settings = options || {};
       const response = await fetch("/repositories");
       const data = await readJson(response);
       if (!response.ok) {
@@ -1309,7 +1310,9 @@ def admin_ui() -> str:
         return;
       }
       renderRepositories(data, preferredRepositoryId);
-      show(data);
+      if (!settings.silent) {
+        show(data);
+      }
     }
 
     async function saveRepository(event) {
@@ -1329,7 +1332,7 @@ def admin_ui() -> str:
       const data = await readJson(response);
       show(data);
       if (response.ok) {
-        await loadRepositories(repositoryId);
+        await loadRepositories(repositoryId, { silent: true });
         repoSelect.value = repositoryId;
       }
     }
@@ -1357,7 +1360,7 @@ def admin_ui() -> str:
         document.getElementById("repo-form").reset();
         document.getElementById("repo-config").value = "{}";
         document.getElementById("repo-active").checked = true;
-        await loadRepositories();
+        await loadRepositories(undefined, { silent: true });
       }
     }
 
