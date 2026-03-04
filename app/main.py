@@ -1121,8 +1121,9 @@ def admin_ui() -> str:
       }
     }
 
-    function renderRepositories(payload) {
+    function renderRepositories(payload, preferredRepositoryId) {
       const repositories = payload.repositories || [];
+      const selectedRepositoryId = preferredRepositoryId || repoSelect.value;
       repoList.innerHTML = "";
       repoSelect.innerHTML = "";
       const defaultRepo = repositories.find((repo) => repo.isDefaultRepository);
@@ -1186,6 +1187,9 @@ def admin_ui() -> str:
         card.addEventListener("click", () => populateRepository(repo));
         repoList.appendChild(card);
       }
+      if (selectedRepositoryId && repositories.some((repo) => repo.repository_id === selectedRepositoryId)) {
+        repoSelect.value = selectedRepositoryId;
+      }
     }
 
     function populateRepository(repo) {
@@ -1197,14 +1201,14 @@ def admin_ui() -> str:
       repoSelect.value = repo.repository_id;
     }
 
-    async function loadRepositories() {
+    async function loadRepositories(preferredRepositoryId) {
       const response = await fetch("/repositories");
       const data = await readJson(response);
       if (!response.ok) {
         show(data);
         return;
       }
-      renderRepositories(data);
+      renderRepositories(data, preferredRepositoryId);
       show(data);
     }
 
@@ -1225,7 +1229,8 @@ def admin_ui() -> str:
       const data = await readJson(response);
       show(data);
       if (response.ok) {
-        await loadRepositories();
+        await loadRepositories(repositoryId);
+        repoSelect.value = repositoryId;
       }
     }
 
