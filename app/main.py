@@ -1165,6 +1165,28 @@ def admin_ui() -> str:
       output.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
     }
 
+    function resolveRepositoryId(explicitRepositoryId, fallbackValue) {
+      const value = explicitRepositoryId || fallbackValue || "";
+      return value.trim();
+    }
+
+    function updateSubjectBackfillCursor(repositoryId, data) {
+      if (!repositoryId || !data) {
+        return;
+      }
+      if (typeof data.next_cursor === "string" && data.next_cursor) {
+        subjectBackfillCursors[repositoryId] = data.next_cursor;
+        return;
+      }
+      if (data.has_more === false) {
+        subjectBackfillCursors[repositoryId] = "";
+      }
+    }
+
+    async function refreshRepositoriesSilently(preferredRepositoryId) {
+      await loadRepositories(preferredRepositoryId, { silent: true });
+    }
+
     async function readJson(response) {
       const contentType = response.headers.get("content-type") || "";
       if (contentType.includes("application/json")) {
@@ -1280,7 +1302,7 @@ def admin_ui() -> str:
     }
 
     async function backfillSubjects(explicitRepositoryId) {
-      const repositoryId = (explicitRepositoryId || repoSelect.value).trim();
+      const repositoryId = resolveRepositoryId(explicitRepositoryId, repoSelect.value);
       if (!repositoryId) {
         show({ error: "Select a repository first." });
         return;
@@ -1307,17 +1329,13 @@ def admin_ui() -> str:
       const data = await readJson(response);
       show(data);
       if (response.ok) {
-        if (data && typeof data.next_cursor === "string" && data.next_cursor) {
-          subjectBackfillCursors[repositoryId] = data.next_cursor;
-        } else if (data && data.has_more === false) {
-          subjectBackfillCursors[repositoryId] = "";
-        }
-        await loadRepositories(repositoryId, { silent: true });
+        updateSubjectBackfillCursor(repositoryId, data);
+        await refreshRepositoriesSilently(repositoryId);
       }
     }
 
     async function clearRepositoryData(explicitRepositoryId) {
-      const repositoryId = (explicitRepositoryId || document.getElementById("repo-id").value).trim();
+      const repositoryId = resolveRepositoryId(explicitRepositoryId, document.getElementById("repo-id").value);
       if (!repositoryId) {
         show({ error: "Select or enter a repository first." });
         return;
@@ -1337,7 +1355,7 @@ def admin_ui() -> str:
       show(data);
       if (response.ok) {
         subjectBackfillCursors[repositoryId] = "";
-        await loadRepositories(repositoryId, { silent: true });
+        await refreshRepositoriesSilently(repositoryId);
       }
     }
 
@@ -1381,13 +1399,13 @@ def admin_ui() -> str:
       const data = await readJson(response);
       show(data);
       if (response.ok) {
-        await loadRepositories(repositoryId, { silent: true });
+        await refreshRepositoriesSilently(repositoryId);
         repoSelect.value = repositoryId;
       }
     }
 
     async function deleteRepository(explicitRepositoryId) {
-      const repositoryId = (explicitRepositoryId || document.getElementById("repo-id").value).trim();
+      const repositoryId = resolveRepositoryId(explicitRepositoryId, document.getElementById("repo-id").value);
       if (!repositoryId) {
         show({ error: "Select or enter a repository first." });
         return;
@@ -1406,10 +1424,11 @@ def admin_ui() -> str:
       const data = await readJson(response);
       show(data);
       if (response.ok) {
+        delete subjectBackfillCursors[repositoryId];
         document.getElementById("repo-form").reset();
         document.getElementById("repo-config").value = "{}";
         document.getElementById("repo-active").checked = true;
-        await loadRepositories(undefined, { silent: true });
+        await refreshRepositoriesSilently();
       }
     }
 
