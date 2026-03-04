@@ -161,55 +161,72 @@ class PublicationStore:
     ) -> list[tuple[str, str, int]]:
         effective_min_count = max(min_count, 1)
         with self._session() as session:
-            variant_counts = (
+            totals_statement = (
                 select(
-                    PublicationSubjectRow.subject_slug.label("subject_slug"),
-                    PublicationSubjectRow.subject_name.label("subject_name"),
-                    sqla_func.count(PublicationSubjectRow.publication_id).label("variant_count"),
+                    PublicationSubjectRow.subject_slug,
+                    sqla_func.count(PublicationSubjectRow.publication_id).label("total_count"),
                 )
                 .where(PublicationSubjectRow.repository_id == repository_id)
-                .group_by(PublicationSubjectRow.subject_slug, PublicationSubjectRow.subject_name)
-            ).subquery()
-
-            ranked = (
-                select(
-                    variant_counts.c.subject_slug,
-                    variant_counts.c.subject_name,
-                    sqla_func.sum(variant_counts.c.variant_count)
-                    .over(partition_by=variant_counts.c.subject_slug)
-                    .label("total_count"),
-                    sa.func.row_number()
-                    .over(
-                        partition_by=variant_counts.c.subject_slug,
-                        order_by=(
-                            variant_counts.c.variant_count.desc(),
-                            sqla_func.length(variant_counts.c.subject_name).asc(),
-                            sqla_func.lower(variant_counts.c.subject_name).asc(),
-                        ),
-                    )
-                    .label("variant_rank"),
-                )
-            ).subquery()
-
-            statement = (
-                select(ranked.c.subject_slug, ranked.c.subject_name, ranked.c.total_count)
-                .where(
-                    ranked.c.variant_rank == 1,
-                    ranked.c.total_count >= effective_min_count,
-                )
+                .group_by(PublicationSubjectRow.subject_slug)
+                .having(sqla_func.count(PublicationSubjectRow.publication_id) >= effective_min_count)
             )
-            if order_by_count_desc:
-                statement = statement.order_by(ranked.c.total_count.desc(), ranked.c.subject_name.asc())
-            else:
-                statement = statement.order_by(ranked.c.subject_name.asc())
-            if limit is not None:
-                statement = statement.limit(max(limit, 1))
-            rows = session.execute(statement).all()
-            return [
-                (slug, name, int(count))
-                for slug, name, count in rows
-                if isinstance(slug, str) and slug and isinstance(name, str) and name
+            total_rows = session.execute(totals_statement).all()
+            if not total_rows:
+                return []
+
+            total_by_slug = {
+                slug: int(count)
+                for slug, count in total_rows
+                if isinstance(slug, str) and slug
+            }
+            if not total_by_slug:
+                return []
+
+            variant_statement = (
+                select(
+                    PublicationSubjectRow.subject_slug,
+                    PublicationSubjectRow.subject_name,
+                    sqla_func.count(PublicationSubjectRow.publication_id).label("variant_count"),
+                )
+                .where(
+                    PublicationSubjectRow.repository_id == repository_id,
+                    PublicationSubjectRow.subject_slug.in_(list(total_by_slug.keys())),
+                )
+                .group_by(PublicationSubjectRow.subject_slug, PublicationSubjectRow.subject_name)
+            )
+            variant_rows = session.execute(variant_statement).all()
+
+            best_label_by_slug: dict[str, tuple[str, int]] = {}
+            for slug, name, variant_count in variant_rows:
+                if not isinstance(slug, str) or not slug or not isinstance(name, str) or not name:
+                    continue
+                candidate = (name, int(variant_count))
+                existing = best_label_by_slug.get(slug)
+                if existing is None:
+                    best_label_by_slug[slug] = candidate
+                    continue
+                existing_name, existing_count = existing
+                if candidate[1] > existing_count:
+                    best_label_by_slug[slug] = candidate
+                    continue
+                if candidate[1] == existing_count:
+                    if len(candidate[0]) < len(existing_name):
+                        best_label_by_slug[slug] = candidate
+                        continue
+                    if len(candidate[0]) == len(existing_name) and candidate[0].casefold() < existing_name.casefold():
+                        best_label_by_slug[slug] = candidate
+
+            rows = [
+                (slug, best_label_by_slug.get(slug, (slug.replace("-", " "), 0))[0], count)
+                for slug, count in total_by_slug.items()
             ]
+            if order_by_count_desc:
+                rows.sort(key=lambda item: (-item[2], item[1].casefold()))
+            else:
+                rows.sort(key=lambda item: item[1].casefold())
+            if limit is not None:
+                rows = rows[: max(limit, 1)]
+            return rows
 
     @staticmethod
     def _normalized_subject_rows(subjects: list[Any]) -> list[dict[str, str]]:
