@@ -1234,12 +1234,12 @@ def admin_ui() -> str:
         <div class="card">
           <h2>Known Repositories</h2>
           <p id="repo-summary" class="summary">Loading repositories...</p>
-          <p class="hint">Use <strong>Backfill Classifications</strong> to populate subject-based facets for existing records in small batches after the schema-only subject index migration.</p>
+          <p class="hint">Select a repository to inspect it on the right. Use the selected panel for management actions such as backfill, clear, delete, or loading config into the edit form.</p>
           <div id="repo-list" class="list"></div>
         </div>
         <div class="card">
           <h2>Selected Repository</h2>
-          <p id="repo-detail-empty" class="summary">Select a repository card to inspect its current configuration and run management actions from one place.</p>
+          <p id="repo-detail-empty" class="summary">Select a repository card to inspect its current configuration, load it into the form, and run management actions from one place.</p>
           <div id="repo-detail" class="detail-grid" hidden></div>
           <div id="repo-detail-actions" class="detail-actions" hidden></div>
         </div>
@@ -1349,16 +1349,22 @@ def admin_ui() -> str:
 
       const detailRows = [
         createDetailRow("Repository", repo.name + " (" + repo.repository_id + ")"),
-        createDetailRow("Source Type", repo.source_type || "n/a"),
-        createDetailRow("Source Domain", repo.sourceDomain || "n/a"),
-        createDetailRow("Items", String(repo.publicationCount != null ? repo.publicationCount : 0)),
-        createDetailRow("Checkpoints", String(repo.checkpointCount != null ? repo.checkpointCount : 0)),
-        createDetailRow("Status", repo.is_active ? "Active" : "Inactive"),
+        createDetailRow("Feed URL", repo.feedHref || "n/a"),
+        createDetailRow("Updated", repo.updated_at || "n/a"),
+        createDetailRow("Created", repo.created_at || "n/a"),
         createDetailRow("Config JSON", JSON.stringify(repo.config || {}, null, 2)),
       ];
       for (const row of detailRows) {
         repoDetail.appendChild(row);
       }
+
+      const editButton = document.createElement("button");
+      editButton.type = "button";
+      editButton.textContent = "Edit In Form";
+      editButton.addEventListener("click", () => {
+        loadRepositoryIntoForm(repo);
+      });
+      repoDetailActions.appendChild(editButton);
 
       const openLink = document.createElement("a");
       openLink.href = repo.feedHref;
@@ -1454,40 +1460,8 @@ def admin_ui() -> str:
         openLink.addEventListener("click", (event) => event.stopPropagation());
         actions.appendChild(openLink);
 
-        const backfillButton = document.createElement("button");
-        backfillButton.type = "button";
-        backfillButton.className = "secondary";
-        backfillButton.textContent = "Backfill Classifications";
-        backfillButton.addEventListener("click", (event) => {
-          event.stopPropagation();
-          backfillSubjects(repo.repository_id).catch((error) => show({ error: String(error) }));
-        });
-        actions.appendChild(backfillButton);
-
-        if (!repo.isDefaultRepository) {
-          const clearButton = document.createElement("button");
-          clearButton.type = "button";
-          clearButton.className = "ghost";
-          clearButton.textContent = "Clear Data";
-          clearButton.addEventListener("click", (event) => {
-            event.stopPropagation();
-            clearRepositoryData(repo.repository_id).catch((error) => show({ error: String(error) }));
-          });
-          actions.appendChild(clearButton);
-
-          const deleteButton = document.createElement("button");
-          deleteButton.type = "button";
-          deleteButton.className = "ghost";
-          deleteButton.textContent = "Delete";
-          deleteButton.addEventListener("click", (event) => {
-            event.stopPropagation();
-            deleteRepository(repo.repository_id).catch((error) => show({ error: String(error) }));
-          });
-          actions.appendChild(deleteButton);
-        }
-
         card.appendChild(actions);
-        card.addEventListener("click", () => populateRepository(repo));
+        card.addEventListener("click", () => selectRepository(repo));
         repoList.appendChild(card);
       }
       if (selectedRepositoryId && repositories.some((repo) => repo.repository_id === selectedRepositoryId)) {
@@ -1557,12 +1531,16 @@ def admin_ui() -> str:
       }
     }
 
-    function populateRepository(repo) {
+    function loadRepositoryIntoForm(repo) {
       document.getElementById("repo-id").value = repo.repository_id;
       document.getElementById("repo-name").value = repo.name;
       document.getElementById("repo-type").value = repo.source_type;
       document.getElementById("repo-config").value = JSON.stringify(repo.config || {}, null, 2);
       document.getElementById("repo-active").checked = Boolean(repo.is_active);
+    }
+
+    function selectRepository(repo) {
+      selectedRepository = repo;
       repoSelect.value = repo.repository_id;
       renderRepositoryDetail(repo);
     }
