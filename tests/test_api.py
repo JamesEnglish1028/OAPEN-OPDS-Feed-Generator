@@ -850,6 +850,56 @@ def test_cleanup_repository_by_domain_removes_only_matching_records(tmp_path) ->
     assert remaining.json()["publications"][0]["metadata"]["title"] == "Keep Me"
 
 
+def test_cleanup_repository_by_identifier_prefix_removes_matching_records(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "cleanup_prefix_case.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "publications": [
+                    {
+                        "id": "keep-prefix-1",
+                        "title": "Keep Prefix Me",
+                        "identifier": "oapen:book:123",
+                    },
+                    {
+                        "id": "remove-prefix-1",
+                        "title": "Remove Prefix Me",
+                        "identifier": "urn:pressbooks.directory:book:456",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+    assert ingest.json()["accepted"] == 2
+
+    dry_run = client.post(
+        "/repositories/default/cleanup/identifier-prefix",
+        json={"prefix": "urn:pressbooks.directory:book:", "dry_run": True},
+    )
+    assert dry_run.status_code == 200
+    assert dry_run.json()["matched_publications"] == 1
+    assert dry_run.json()["removed_publications"] == 0
+
+    cleanup = client.post(
+        "/repositories/default/cleanup/identifier-prefix",
+        json={"prefix": "urn:pressbooks.directory:book:"},
+    )
+    assert cleanup.status_code == 200
+    payload = cleanup.json()
+    assert payload["removed_publications"] == 1
+    assert payload["remaining_publications"] == 1
+
+    remaining = client.get("/opds?page=1&page_size=10")
+    assert remaining.status_code == 200
+    assert remaining.json()["metadata"]["numberOfItems"] == 1
+    assert remaining.json()["publications"][0]["metadata"]["title"] == "Keep Prefix Me"
+
+
 def test_admin_ui_renders_repository_and_opds_json_controls() -> None:
     response = client.get("/admin")
     assert response.status_code == 200

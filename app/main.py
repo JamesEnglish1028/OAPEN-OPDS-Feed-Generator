@@ -88,6 +88,11 @@ class CleanupByDomainRequest(BaseModel):
     dry_run: bool = False
 
 
+class CleanupByIdentifierPrefixRequest(BaseModel):
+    prefix: str
+    dry_run: bool = False
+
+
 def _as_list(value):
     if value is None:
         return []
@@ -129,6 +134,15 @@ def _publication_matches_domain(publication, domain: str) -> bool:
         if isinstance(candidate, str) and candidate and _url_matches_domain(candidate, domain):
             return True
     return False
+
+
+def _publication_matches_identifier_prefix(publication, prefix: str) -> bool:
+    if not isinstance(publication.identifier, str):
+        return False
+    identifier = publication.identifier.strip()
+    if not identifier:
+        return False
+    return identifier.casefold().startswith(prefix.casefold())
 
 
 ingest_jobs: dict[str, dict] = {}
@@ -1464,6 +1478,35 @@ def cleanup_repository_by_domain(repository_id: str, request: CleanupByDomainReq
         "repository_id": repository_id,
         "repository_name": repository.name,
         "domain": domain,
+        "dry_run": request.dry_run,
+        "matched_publications": len(matched_publications),
+        "removed_publications": removed,
+        "remaining_publications": store.count(repository_id=repository_id),
+        "matched_ids": matched_publications[:100],
+    }
+
+
+@app.post("/repositories/{repository_id}/cleanup/identifier-prefix")
+def cleanup_repository_by_identifier_prefix(repository_id: str, request: CleanupByIdentifierPrefixRequest) -> dict:
+    repository = _get_repository_or_404(repository_id)
+    prefix = request.prefix.strip()
+    if not prefix:
+        raise HTTPException(status_code=400, detail="prefix is required")
+
+    matched_publications = [
+        publication.publication_id
+        for publication in store.all(repository_id=repository_id)
+        if _publication_matches_identifier_prefix(publication, prefix)
+    ]
+    removed = 0
+    if not request.dry_run and matched_publications:
+        removed = store.delete_publications(matched_publications, repository_id=repository_id)
+        _invalidate_opds_cache(repository_id)
+
+    return {
+        "repository_id": repository_id,
+        "repository_name": repository.name,
+        "prefix": prefix,
         "dry_run": request.dry_run,
         "matched_publications": len(matched_publications),
         "removed_publications": removed,
