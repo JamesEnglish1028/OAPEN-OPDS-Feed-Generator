@@ -1717,7 +1717,7 @@ def startup() -> None:
         _ensure_default_repository()
         if os.getenv("SCHEDULER_ENABLED", "true").lower() == "true":
             harvest_scheduler.start()
-    except Exception:
+    except BaseException:
         logger.exception("Application startup failed")
         raise
 
