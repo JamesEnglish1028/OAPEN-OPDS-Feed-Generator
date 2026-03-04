@@ -72,10 +72,14 @@ export REDIS_URL="redis://localhost:6379/0"
 export OPDS_CACHE_TTL_SECONDS="900"
 export OPDS_CACHE_PREFIX="opds-cache"
 export OPDS_CACHE_INVALIDATE_EVERY_N_UPSERTS="0"
+export OPDS_COLLECTION_FACET_LINK_LIMIT="100"
 ```
 
 `OPDS_CACHE_INVALIDATE_EVERY_N_UPSERTS` controls progressive cache refresh during long ingests.  
 Use `0` to disable (default). Set a positive value (for example `500` or `1000`) to invalidate OPDS cache every N accepted upserts while ingest is running.
+
+`OPDS_COLLECTION_FACET_LINK_LIMIT` limits the number of collection links embedded in normal OPDS facet groups.
+Use `/opds/collections` (or repository-scoped `/repositories/{repository_id}/opds/collections`) for full paged collection browsing.
 
 Run migrations:
 
@@ -156,6 +160,12 @@ Collection feed:
 
 ```bash
 curl "http://127.0.0.1:8000/opds/collections/scifi-classics?page=1&page_size=25"
+```
+
+Collections index:
+
+```bash
+curl "http://127.0.0.1:8000/opds/collections?page=1&page_size=100"
 ```
 
 Publication year feed:

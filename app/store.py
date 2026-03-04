@@ -726,6 +726,16 @@ class PublicationStore:
             return total, [self._to_publication(row) for row in rows]
 
     def list_collection_counts(self, repository_id: str = "default") -> list[dict[str, str | int]]:
+        return self.list_collection_counts_limited(repository_id=repository_id, limit=None, offset=0, order_by_count_desc=False)
+
+    def list_collection_counts_limited(
+        self,
+        repository_id: str = "default",
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+        order_by_count_desc: bool = False,
+    ) -> list[dict[str, str | int]]:
         with self._session() as session:
             count_expr = sqla_func.count(PublicationRow.publication_id)
             min_count = self._collection_min_count(repository_id)
@@ -734,15 +744,38 @@ class PublicationStore:
                 .where(PublicationRow.repository_id == repository_id, PublicationRow.collection_slug.is_not(None))
                 .group_by(PublicationRow.collection_slug, PublicationRow.collection)
                 .having(count_expr >= min_count)
-                .order_by(PublicationRow.collection.asc())
             )
+            if order_by_count_desc:
+                statement = statement.order_by(count_expr.desc(), PublicationRow.collection.asc())
+            else:
+                statement = statement.order_by(PublicationRow.collection.asc())
+            statement = statement.offset(max(offset, 0))
+            if limit is not None:
+                statement = statement.limit(max(limit, 1))
             rows = session.execute(statement).all()
             return [{"slug": slug, "name": name, "count": count} for slug, name, count in rows if slug and name]
+
+    def count_collection_facets(self, repository_id: str = "default") -> int:
+        with self._session() as session:
+            count_expr = sqla_func.count(PublicationRow.publication_id)
+            min_count = self._collection_min_count(repository_id)
+            subquery = (
+                select(PublicationRow.collection_slug, PublicationRow.collection)
+                .where(PublicationRow.repository_id == repository_id, PublicationRow.collection_slug.is_not(None))
+                .group_by(PublicationRow.collection_slug, PublicationRow.collection)
+                .having(count_expr >= min_count)
+                .subquery()
+            )
+            return int(session.scalar(select(sqla_func.count()).select_from(subquery)) or 0)
 
     def list_collection_counts_by_publication_year(
         self,
         year: int,
         repository_id: str = "default",
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+        order_by_count_desc: bool = False,
     ) -> list[dict[str, str | int]]:
         with self._session() as session:
             count_expr = sqla_func.count(PublicationRow.publication_id)
@@ -756,8 +789,14 @@ class PublicationStore:
                 )
                 .group_by(PublicationRow.collection_slug, PublicationRow.collection)
                 .having(count_expr >= min_count)
-                .order_by(PublicationRow.collection.asc())
             )
+            if order_by_count_desc:
+                statement = statement.order_by(count_expr.desc(), PublicationRow.collection.asc())
+            else:
+                statement = statement.order_by(PublicationRow.collection.asc())
+            statement = statement.offset(max(offset, 0))
+            if limit is not None:
+                statement = statement.limit(max(limit, 1))
             rows = session.execute(statement).all()
             return [{"slug": slug, "name": name, "count": int(count)} for slug, name, count in rows if slug and name]
 
