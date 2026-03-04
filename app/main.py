@@ -1249,6 +1249,16 @@ def admin_ui() -> str:
         actions.appendChild(backfillButton);
 
         if (!repo.isDefaultRepository) {
+          const clearButton = document.createElement("button");
+          clearButton.type = "button";
+          clearButton.className = "ghost";
+          clearButton.textContent = "Clear Data";
+          clearButton.addEventListener("click", (event) => {
+            event.stopPropagation();
+            clearRepositoryData(repo.repository_id).catch((error) => show({ error: String(error) }));
+          });
+          actions.appendChild(clearButton);
+
           const deleteButton = document.createElement("button");
           deleteButton.type = "button";
           deleteButton.className = "ghost";
@@ -1302,6 +1312,31 @@ def admin_ui() -> str:
         } else if (data && data.has_more === false) {
           subjectBackfillCursors[repositoryId] = "";
         }
+        await loadRepositories(repositoryId, { silent: true });
+      }
+    }
+
+    async function clearRepositoryData(explicitRepositoryId) {
+      const repositoryId = (explicitRepositoryId || document.getElementById("repo-id").value).trim();
+      if (!repositoryId) {
+        show({ error: "Select or enter a repository first." });
+        return;
+      }
+      if (repositoryId === "default") {
+        show({ error: "The default repository cannot be cleared." });
+        return;
+      }
+      const confirmed = window.confirm("Clear harvested data and checkpoints for '" + repositoryId + "' while keeping its configuration?");
+      if (!confirmed) {
+        return;
+      }
+      const response = await fetch("/repositories/" + encodeURIComponent(repositoryId) + "/clear-data", {
+        method: "POST",
+      });
+      const data = await readJson(response);
+      show(data);
+      if (response.ok) {
+        subjectBackfillCursors[repositoryId] = "";
         await loadRepositories(repositoryId, { silent: true });
       }
     }
@@ -1517,6 +1552,26 @@ def delete_repository(repository_id: str) -> dict:
         "repository_name": repository.name,
         "removed_publications": removed_publications,
         "removed_checkpoints": removed_checkpoints,
+    }
+
+
+@app.post("/repositories/{repository_id}/clear-data")
+def clear_repository_data(repository_id: str) -> dict:
+    if repository_id == DEFAULT_REPOSITORY_ID:
+        raise HTTPException(status_code=400, detail="Default repository data cannot be cleared")
+    repository = _get_repository_or_404(repository_id)
+    removed_publications = store.count(repository_id=repository_id)
+    removed_checkpoints = len(store.list_checkpoints(repository_id=repository_id))
+    store.clear(repository_id=repository_id)
+    store.clear_checkpoints(repository_id=repository_id)
+    _invalidate_opds_cache(repository_id)
+    return {
+        "cleared": True,
+        "repository_id": repository_id,
+        "repository_name": repository.name,
+        "removed_publications": removed_publications,
+        "removed_checkpoints": removed_checkpoints,
+        "repository_preserved": True,
     }
 
 
