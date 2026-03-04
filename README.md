@@ -73,6 +73,8 @@ export OPDS_CACHE_TTL_SECONDS="900"
 export OPDS_CACHE_PREFIX="opds-cache"
 export OPDS_CACHE_INVALIDATE_EVERY_N_UPSERTS="0"
 export OPDS_COLLECTION_FACET_LINK_LIMIT="100"
+export OPDS_CLASSIFICATION_FACET_LINK_LIMIT="100"
+export OPDS_SUBCLASSIFICATION_FACET_LINK_LIMIT="100"
 ```
 
 `OPDS_CACHE_INVALIDATE_EVERY_N_UPSERTS` controls progressive cache refresh during long ingests.  
@@ -80,6 +82,12 @@ Use `0` to disable (default). Set a positive value (for example `500` or `1000`)
 
 `OPDS_COLLECTION_FACET_LINK_LIMIT` limits the number of collection links embedded in normal OPDS facet groups.
 Use `/opds/collections` (or repository-scoped `/repositories/{repository_id}/opds/collections`) for full paged collection browsing.
+
+`OPDS_CLASSIFICATION_FACET_LINK_LIMIT` limits top-level classification links embedded in normal OPDS facet groups.
+Use `/opds/classifications` (or repository-scoped equivalent) for full paged classification browsing.
+
+`OPDS_SUBCLASSIFICATION_FACET_LINK_LIMIT` limits sub-classification links embedded on classification feeds.
+Use `/opds/classifications/{classification_slug}/subjects` (or repository-scoped equivalent) for full paged sub-classification browsing.
 
 Run migrations:
 
@@ -166,6 +174,18 @@ Collections index:
 
 ```bash
 curl "http://127.0.0.1:8000/opds/collections?page=1&page_size=100"
+```
+
+Classifications index:
+
+```bash
+curl "http://127.0.0.1:8000/opds/classifications?page=1&page_size=100"
+```
+
+Sub-classifications index for a classification:
+
+```bash
+curl "http://127.0.0.1:8000/opds/classifications/education/subjects?page=1&page_size=100"
 ```
 
 Publication year feed:

@@ -30,6 +30,8 @@ from app.validation import validate_palace_opds_feed
 DEFAULT_REPOSITORY_ID = "default"
 DEFAULT_REPOSITORY_NAME = "Default OPDS Repository"
 COLLECTION_FACET_LINK_LIMIT = max(1, int(os.getenv("OPDS_COLLECTION_FACET_LINK_LIMIT", "100")))
+CLASSIFICATION_FACET_LINK_LIMIT = max(1, int(os.getenv("OPDS_CLASSIFICATION_FACET_LINK_LIMIT", "100")))
+SUBCLASSIFICATION_FACET_LINK_LIMIT = max(1, int(os.getenv("OPDS_SUBCLASSIFICATION_FACET_LINK_LIMIT", "100")))
 
 app = FastAPI(title="OAPEN OPDS Feed Generator", version="0.2.0")
 logger = logging.getLogger(__name__)
@@ -760,6 +762,160 @@ def _build_collections_index_response(
     }
 
 
+def _build_classifications_index_response(
+    *,
+    request: Request,
+    repository_id: str,
+    path: str,
+    page: int,
+    page_size: int,
+) -> dict:
+    offset = (page - 1) * page_size
+    total = store.count_category_facets(repository_id=repository_id, min_count=3)
+    items = store.list_category_counts(
+        repository_id=repository_id,
+        min_count=3,
+        limit=page_size,
+        offset=offset,
+        order_by_count_desc=True,
+    )
+    last_page = max(1, (total + page_size - 1) // page_size) if page_size > 0 else 1
+    start_path = "/opds" if repository_id == DEFAULT_REPOSITORY_ID else f"/repositories/{repository_id}/opds"
+    class_prefix = _classifications_index_path(repository_id)
+    links = [
+        {"rel": "self", "href": _build_url(request, path, {"page": page, "page_size": page_size}), "type": "application/opds+json"},
+        {"rel": "start", "href": _build_url(request, start_path, {}), "type": "application/opds+json"},
+        {"rel": "first", "href": _build_url(request, path, {"page": 1, "page_size": page_size}), "type": "application/opds+json"},
+        {"rel": "last", "href": _build_url(request, path, {"page": last_page, "page_size": page_size}), "type": "application/opds+json"},
+    ]
+    if path != start_path:
+        links.append({"rel": "up", "href": _build_url(request, start_path, {}), "type": "application/opds+json"})
+    if page > 1:
+        links.append(
+            {
+                "rel": "previous",
+                "href": _build_url(request, path, {"page": page - 1, "page_size": page_size}),
+                "type": "application/opds+json",
+            }
+        )
+    if page < last_page:
+        links.append(
+            {
+                "rel": "next",
+                "href": _build_url(request, path, {"page": page + 1, "page_size": page_size}),
+                "type": "application/opds+json",
+            }
+        )
+    navigation = [
+        {
+            "href": _build_url(request, f"{class_prefix}/{item['slug']}", {}),
+            "type": "application/opds+json",
+            "title": item["name"],
+            "rel": "subsection",
+            "properties": {"numberOfItems": int(item["count"])},
+        }
+        for item in items
+    ]
+    repository = store.get_repository(repository_id)
+    repository_name = repository.name if repository else (
+        DEFAULT_REPOSITORY_NAME if repository_id == DEFAULT_REPOSITORY_ID else repository_id
+    )
+    return {
+        "metadata": {
+            "@type": "http://schema.org/DataFeed",
+            "title": "Classifications",
+            "numberOfItems": total,
+            "itemsPerPage": len(navigation),
+            "currentPage": page,
+            "repositoryId": repository_id,
+            "repositoryName": repository_name,
+            "isDefaultRepository": repository_id == DEFAULT_REPOSITORY_ID,
+        },
+        "links": links,
+        "navigation": navigation,
+    }
+
+
+def _build_subclassifications_index_response(
+    *,
+    request: Request,
+    repository_id: str,
+    category_slug: str,
+    path: str,
+    page: int,
+    page_size: int,
+) -> dict:
+    category = store.get_category(category_slug, repository_id=repository_id)
+    if category is None:
+        raise HTTPException(status_code=404, detail="Classification not found")
+    offset = (page - 1) * page_size
+    total = store.count_subject_facets_for_category(category_slug, repository_id=repository_id, min_count=1)
+    items = store.list_subject_counts_for_category(
+        category_slug=category_slug,
+        repository_id=repository_id,
+        min_count=1,
+        limit=page_size,
+        offset=offset,
+        order_by_count_desc=True,
+    )
+    last_page = max(1, (total + page_size - 1) // page_size) if page_size > 0 else 1
+    start_path = _classifications_index_path(repository_id)
+    sub_path_prefix = f"{start_path}/{category_slug}"
+    links = [
+        {"rel": "self", "href": _build_url(request, path, {"page": page, "page_size": page_size}), "type": "application/opds+json"},
+        {"rel": "start", "href": _build_url(request, start_path, {}), "type": "application/opds+json"},
+        {"rel": "up", "href": _build_url(request, f"{start_path}/{category_slug}", {}), "type": "application/opds+json"},
+        {"rel": "first", "href": _build_url(request, path, {"page": 1, "page_size": page_size}), "type": "application/opds+json"},
+        {"rel": "last", "href": _build_url(request, path, {"page": last_page, "page_size": page_size}), "type": "application/opds+json"},
+    ]
+    if page > 1:
+        links.append(
+            {
+                "rel": "previous",
+                "href": _build_url(request, path, {"page": page - 1, "page_size": page_size}),
+                "type": "application/opds+json",
+            }
+        )
+    if page < last_page:
+        links.append(
+            {
+                "rel": "next",
+                "href": _build_url(request, path, {"page": page + 1, "page_size": page_size}),
+                "type": "application/opds+json",
+            }
+        )
+    navigation = [
+        {
+            "href": _build_url(request, f"{sub_path_prefix}/subjects/{item['slug']}", {}),
+            "type": "application/opds+json",
+            "title": item["name"],
+            "rel": "subsection",
+            "properties": {"numberOfItems": int(item["count"])},
+        }
+        for item in items
+    ]
+    repository = store.get_repository(repository_id)
+    repository_name = repository.name if repository else (
+        DEFAULT_REPOSITORY_NAME if repository_id == DEFAULT_REPOSITORY_ID else repository_id
+    )
+    return {
+        "metadata": {
+            "@type": "http://schema.org/DataFeed",
+            "title": f"Sub-Classifications: {category['name']}",
+            "numberOfItems": total,
+            "itemsPerPage": len(navigation),
+            "currentPage": page,
+            "repositoryId": repository_id,
+            "repositoryName": repository_name,
+            "isDefaultRepository": repository_id == DEFAULT_REPOSITORY_ID,
+            "classificationSlug": category_slug,
+            "classificationName": category["name"],
+        },
+        "links": links,
+        "navigation": navigation,
+    }
+
+
 def _language_path_prefix(repository_id: str) -> str:
     if repository_id == DEFAULT_REPOSITORY_ID:
         return "/opds/languages"
@@ -776,6 +932,10 @@ def _collections_index_path(repository_id: str) -> str:
     if repository_id == DEFAULT_REPOSITORY_ID:
         return "/opds/collections"
     return f"/repositories/{repository_id}/opds/collections"
+
+
+def _classifications_index_path(repository_id: str) -> str:
+    return _classification_path_prefix(repository_id)
 
 
 def _year_path_prefix(repository_id: str, year: int) -> str:
@@ -872,6 +1032,7 @@ def _attach_browse_facets(request: Request, response: dict, repository_id: str) 
             order_by_count_desc=True,
         )
     ]
+    total_classifications = store.count_category_facets(repository_id=repository_id, min_count=3)
     classification_links = [
         {
             "href": _build_url(request, f"{_classification_path_prefix(repository_id)}/{item['slug']}", {}),
@@ -879,7 +1040,13 @@ def _attach_browse_facets(request: Request, response: dict, repository_id: str) 
             "title": item["name"],
             "properties": {"numberOfItems": int(item["count"])},
         }
-        for item in store.list_category_counts(repository_id=repository_id)
+        for item in store.list_category_counts(
+            repository_id=repository_id,
+            min_count=3,
+            limit=CLASSIFICATION_FACET_LINK_LIMIT,
+            offset=0,
+            order_by_count_desc=True,
+        )
     ]
     if not collection_links and not classification_links:
         return response
@@ -910,6 +1077,16 @@ def _attach_browse_facets(request: Request, response: dict, repository_id: str) 
                 "title": "Browse All Collections",
             },
         ]
+    if total_classifications > len(classification_links):
+        response["links"] = [
+            *response.get("links", []),
+            {
+                "rel": "collection",
+                "href": _build_url(request, _classifications_index_path(repository_id), {}),
+                "type": "application/opds+json",
+                "title": "Browse All Classifications",
+            },
+        ]
     return response
 
 
@@ -937,7 +1114,14 @@ def _attach_year_browse_facets(request: Request, response: dict, repository_id: 
             "title": item["name"],
             "properties": {"numberOfItems": int(item["count"])},
         }
-        for item in store.list_category_counts_by_publication_year(year=year, repository_id=repository_id)
+        for item in store.list_category_counts_by_publication_year(
+            year=year,
+            repository_id=repository_id,
+            min_count=3,
+            limit=CLASSIFICATION_FACET_LINK_LIMIT,
+            offset=0,
+            order_by_count_desc=True,
+        )
     ]
     if not collection_links and not classification_links:
         return response
@@ -976,15 +1160,35 @@ def _attach_subclassification_facets(
     category_slug: str,
     year: int | None = None,
 ) -> dict:
-    subject_items = (
-        store.list_subject_counts_for_category_by_publication_year(
+    total_subjects = (
+        store.count_subject_facets_for_category_by_publication_year(
             category_slug=category_slug,
             year=year,
             repository_id=repository_id,
             min_count=1,
         )
         if year is not None
-        else store.list_subject_counts_for_category(category_slug=category_slug, repository_id=repository_id, min_count=1)
+        else store.count_subject_facets_for_category(category_slug, repository_id=repository_id, min_count=1)
+    )
+    subject_items = (
+        store.list_subject_counts_for_category_by_publication_year(
+            category_slug=category_slug,
+            year=year,
+            repository_id=repository_id,
+            min_count=1,
+            limit=SUBCLASSIFICATION_FACET_LINK_LIMIT,
+            offset=0,
+            order_by_count_desc=True,
+        )
+        if year is not None
+        else store.list_subject_counts_for_category(
+            category_slug=category_slug,
+            repository_id=repository_id,
+            min_count=1,
+            limit=SUBCLASSIFICATION_FACET_LINK_LIMIT,
+            offset=0,
+            order_by_count_desc=True,
+        )
     )
     path_prefix = (
         f"{_year_path_prefix(repository_id, year)}/classifications/{category_slug}"
@@ -1013,6 +1217,16 @@ def _attach_subclassification_facets(
             "links": subject_links,
         },
     ]
+    if year is None and total_subjects > len(subject_links):
+        response["links"] = [
+            *response.get("links", []),
+            {
+                "rel": "collection",
+                "href": _build_url(request, f"{_classification_path_prefix(repository_id)}/{category_slug}/subjects", {}),
+                "type": "application/opds+json",
+                "title": "Browse All Sub-Classifications",
+            },
+        ]
     return response
 
 
@@ -2579,6 +2793,88 @@ def opds_collections_index_repository(
             request=request,
             repository_id=repository_id,
             path=f"/repositories/{repository_id}/opds/collections",
+            page=page,
+            page_size=page_size,
+        )
+
+    return _cached_opds_response(request, build_response, repository_id=repository_id)
+
+
+@app.get("/opds/classifications")
+def opds_classifications_index(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=500),
+) -> dict:
+    def build_response() -> dict:
+        return _build_classifications_index_response(
+            request=request,
+            repository_id=DEFAULT_REPOSITORY_ID,
+            path="/opds/classifications",
+            page=page,
+            page_size=page_size,
+        )
+
+    return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
+
+
+@app.get("/repositories/{repository_id}/opds/classifications")
+def opds_classifications_index_repository(
+    repository_id: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=500),
+) -> dict:
+    _get_repository_or_404(repository_id)
+
+    def build_response() -> dict:
+        return _build_classifications_index_response(
+            request=request,
+            repository_id=repository_id,
+            path=f"/repositories/{repository_id}/opds/classifications",
+            page=page,
+            page_size=page_size,
+        )
+
+    return _cached_opds_response(request, build_response, repository_id=repository_id)
+
+
+@app.get("/opds/classifications/{classification_slug}/subjects")
+def opds_subclassifications_index(
+    classification_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=500),
+) -> dict:
+    def build_response() -> dict:
+        return _build_subclassifications_index_response(
+            request=request,
+            repository_id=DEFAULT_REPOSITORY_ID,
+            category_slug=classification_slug,
+            path=f"/opds/classifications/{classification_slug}/subjects",
+            page=page,
+            page_size=page_size,
+        )
+
+    return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
+
+
+@app.get("/repositories/{repository_id}/opds/classifications/{classification_slug}/subjects")
+def opds_subclassifications_index_repository(
+    repository_id: str,
+    classification_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=500),
+) -> dict:
+    _get_repository_or_404(repository_id)
+
+    def build_response() -> dict:
+        return _build_subclassifications_index_response(
+            request=request,
+            repository_id=repository_id,
+            category_slug=classification_slug,
+            path=f"/repositories/{repository_id}/opds/classifications/{classification_slug}/subjects",
             page=page,
             page_size=page_size,
         )

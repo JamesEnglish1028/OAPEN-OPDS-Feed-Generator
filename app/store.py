@@ -821,15 +821,46 @@ class PublicationStore:
         repository_id: str = "default",
         *,
         min_count: int = 1,
+        limit: int | None = None,
+        offset: int = 0,
+        order_by_count_desc: bool = False,
     ) -> list[dict[str, str | int]]:
-        rows = self._subject_facet_rows(repository_id=repository_id, min_count=min_count, order_by_count_desc=False)
-        out = []
-        for slug, name, count in rows:
-            mapped_category = classify_subject_category(name)
-            mapped_slug = _slugify_value(mapped_category)
-            if mapped_slug == category_slug:
-                out.append({"slug": slug, "name": name, "count": count})
-        return out
+        effective_min_count = max(min_count, 1)
+        with self._session() as session:
+            count_expr = sqla_func.count(sqla_func.distinct(PublicationSubjectRow.publication_id))
+            statement = (
+                select(
+                    PublicationSubjectRow.subject_slug,
+                    PublicationSubjectRow.subject_name,
+                    count_expr,
+                )
+                .join(
+                    PublicationSubjectCategoryRow,
+                    and_(
+                        PublicationSubjectCategoryRow.publication_id == PublicationSubjectRow.publication_id,
+                        PublicationSubjectCategoryRow.repository_id == PublicationSubjectRow.repository_id,
+                    ),
+                )
+                .where(
+                    PublicationSubjectRow.repository_id == repository_id,
+                    PublicationSubjectCategoryRow.category_slug == category_slug,
+                )
+                .group_by(PublicationSubjectRow.subject_slug, PublicationSubjectRow.subject_name)
+                .having(count_expr >= effective_min_count)
+            )
+            if order_by_count_desc:
+                statement = statement.order_by(count_expr.desc(), PublicationSubjectRow.subject_name.asc())
+            else:
+                statement = statement.order_by(PublicationSubjectRow.subject_name.asc())
+            statement = statement.offset(max(offset, 0))
+            if limit is not None:
+                statement = statement.limit(max(limit, 1))
+            rows = session.execute(statement).all()
+            return [
+                {"slug": slug, "name": name, "count": int(count)}
+                for slug, name, count in rows
+                if isinstance(slug, str) and slug and isinstance(name, str) and name
+            ]
 
     def list_subject_counts_for_category_by_publication_year(
         self,
@@ -838,6 +869,9 @@ class PublicationStore:
         repository_id: str = "default",
         *,
         min_count: int = 1,
+        limit: int | None = None,
+        offset: int = 0,
+        order_by_count_desc: bool = False,
     ) -> list[dict[str, str | int]]:
         effective_min_count = max(min_count, 1)
         with self._session() as session:
@@ -858,24 +892,41 @@ class PublicationStore:
                 .where(
                     PublicationSubjectRow.repository_id == repository_id,
                     PublicationRow.publication_year == year,
+                    PublicationSubjectCategoryRow.category_slug == category_slug,
+                )
+                .join(
+                    PublicationSubjectCategoryRow,
+                    and_(
+                        PublicationSubjectCategoryRow.publication_id == PublicationSubjectRow.publication_id,
+                        PublicationSubjectCategoryRow.repository_id == PublicationSubjectRow.repository_id,
+                    ),
                 )
                 .group_by(PublicationSubjectRow.subject_slug, PublicationSubjectRow.subject_name)
                 .having(count_expr >= effective_min_count)
             )
+            if order_by_count_desc:
+                statement = statement.order_by(count_expr.desc(), PublicationSubjectRow.subject_name.asc())
+            else:
+                statement = statement.order_by(PublicationSubjectRow.subject_name.asc())
+            statement = statement.offset(max(offset, 0))
+            if limit is not None:
+                statement = statement.limit(max(limit, 1))
             rows = session.execute(statement).all()
+            return [
+                {"slug": slug, "name": name, "count": int(count)}
+                for slug, name, count in rows
+                if isinstance(slug, str) and slug and isinstance(name, str) and name
+            ]
 
-        out = []
-        for slug, name, count in rows:
-            if not isinstance(slug, str) or not slug or not isinstance(name, str) or not name:
-                continue
-            mapped_category = classify_subject_category(name)
-            mapped_slug = _slugify_value(mapped_category)
-            if mapped_slug == category_slug:
-                out.append({"slug": slug, "name": name, "count": int(count)})
-        out.sort(key=lambda item: str(item["name"]).casefold())
-        return out
-
-    def list_category_counts(self, repository_id: str = "default", *, min_count: int = 3) -> list[dict[str, str | int]]:
+    def list_category_counts(
+        self,
+        repository_id: str = "default",
+        *,
+        min_count: int = 3,
+        limit: int | None = None,
+        offset: int = 0,
+        order_by_count_desc: bool = False,
+    ) -> list[dict[str, str | int]]:
         effective_min_count = max(min_count, 1)
         with self._session() as session:
             count_expr = sqla_func.count(PublicationSubjectCategoryRow.publication_id)
@@ -884,8 +935,14 @@ class PublicationStore:
                 .where(PublicationSubjectCategoryRow.repository_id == repository_id)
                 .group_by(PublicationSubjectCategoryRow.category_slug, PublicationSubjectCategoryRow.category_name)
                 .having(count_expr >= effective_min_count)
-                .order_by(PublicationSubjectCategoryRow.category_name.asc())
             )
+            if order_by_count_desc:
+                statement = statement.order_by(count_expr.desc(), PublicationSubjectCategoryRow.category_name.asc())
+            else:
+                statement = statement.order_by(PublicationSubjectCategoryRow.category_name.asc())
+            statement = statement.offset(max(offset, 0))
+            if limit is not None:
+                statement = statement.limit(max(limit, 1))
             rows = session.execute(statement).all()
             return [
                 {"slug": slug, "name": name, "count": int(count)}
@@ -899,6 +956,9 @@ class PublicationStore:
         repository_id: str = "default",
         *,
         min_count: int = 3,
+        limit: int | None = None,
+        offset: int = 0,
+        order_by_count_desc: bool = False,
     ) -> list[dict[str, str | int]]:
         effective_min_count = max(min_count, 1)
         with self._session() as session:
@@ -922,14 +982,100 @@ class PublicationStore:
                 )
                 .group_by(PublicationSubjectCategoryRow.category_slug, PublicationSubjectCategoryRow.category_name)
                 .having(count_expr >= effective_min_count)
-                .order_by(PublicationSubjectCategoryRow.category_name.asc())
             )
+            if order_by_count_desc:
+                statement = statement.order_by(count_expr.desc(), PublicationSubjectCategoryRow.category_name.asc())
+            else:
+                statement = statement.order_by(PublicationSubjectCategoryRow.category_name.asc())
+            statement = statement.offset(max(offset, 0))
+            if limit is not None:
+                statement = statement.limit(max(limit, 1))
             rows = session.execute(statement).all()
             return [
                 {"slug": slug, "name": name, "count": int(count)}
                 for slug, name, count in rows
                 if isinstance(slug, str) and slug and isinstance(name, str) and name
             ]
+
+    def count_category_facets(self, repository_id: str = "default", *, min_count: int = 3) -> int:
+        effective_min_count = max(min_count, 1)
+        with self._session() as session:
+            count_expr = sqla_func.count(PublicationSubjectCategoryRow.publication_id)
+            subquery = (
+                select(PublicationSubjectCategoryRow.category_slug, PublicationSubjectCategoryRow.category_name)
+                .where(PublicationSubjectCategoryRow.repository_id == repository_id)
+                .group_by(PublicationSubjectCategoryRow.category_slug, PublicationSubjectCategoryRow.category_name)
+                .having(count_expr >= effective_min_count)
+                .subquery()
+            )
+            return int(session.scalar(select(sqla_func.count()).select_from(subquery)) or 0)
+
+    def count_subject_facets_for_category(
+        self,
+        category_slug: str,
+        repository_id: str = "default",
+        *,
+        min_count: int = 1,
+    ) -> int:
+        effective_min_count = max(min_count, 1)
+        with self._session() as session:
+            count_expr = sqla_func.count(sqla_func.distinct(PublicationSubjectRow.publication_id))
+            subquery = (
+                select(PublicationSubjectRow.subject_slug, PublicationSubjectRow.subject_name)
+                .join(
+                    PublicationSubjectCategoryRow,
+                    and_(
+                        PublicationSubjectCategoryRow.publication_id == PublicationSubjectRow.publication_id,
+                        PublicationSubjectCategoryRow.repository_id == PublicationSubjectRow.repository_id,
+                    ),
+                )
+                .where(
+                    PublicationSubjectRow.repository_id == repository_id,
+                    PublicationSubjectCategoryRow.category_slug == category_slug,
+                )
+                .group_by(PublicationSubjectRow.subject_slug, PublicationSubjectRow.subject_name)
+                .having(count_expr >= effective_min_count)
+                .subquery()
+            )
+            return int(session.scalar(select(sqla_func.count()).select_from(subquery)) or 0)
+
+    def count_subject_facets_for_category_by_publication_year(
+        self,
+        category_slug: str,
+        year: int,
+        repository_id: str = "default",
+        *,
+        min_count: int = 1,
+    ) -> int:
+        effective_min_count = max(min_count, 1)
+        with self._session() as session:
+            count_expr = sqla_func.count(sqla_func.distinct(PublicationSubjectRow.publication_id))
+            subquery = (
+                select(PublicationSubjectRow.subject_slug, PublicationSubjectRow.subject_name)
+                .join(
+                    PublicationRow,
+                    and_(
+                        PublicationRow.publication_id == PublicationSubjectRow.publication_id,
+                        PublicationRow.repository_id == PublicationSubjectRow.repository_id,
+                    ),
+                )
+                .join(
+                    PublicationSubjectCategoryRow,
+                    and_(
+                        PublicationSubjectCategoryRow.publication_id == PublicationSubjectRow.publication_id,
+                        PublicationSubjectCategoryRow.repository_id == PublicationSubjectRow.repository_id,
+                    ),
+                )
+                .where(
+                    PublicationSubjectRow.repository_id == repository_id,
+                    PublicationRow.publication_year == year,
+                    PublicationSubjectCategoryRow.category_slug == category_slug,
+                )
+                .group_by(PublicationSubjectRow.subject_slug, PublicationSubjectRow.subject_name)
+                .having(count_expr >= effective_min_count)
+                .subquery()
+            )
+            return int(session.scalar(select(sqla_func.count()).select_from(subquery)) or 0)
 
     def get_category(self, category_slug: str, repository_id: str = "default") -> dict[str, str | int] | None:
         for item in self.list_category_counts(repository_id=repository_id):
