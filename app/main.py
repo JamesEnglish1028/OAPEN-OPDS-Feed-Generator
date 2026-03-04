@@ -1493,14 +1493,11 @@ def cleanup_repository_by_identifier_prefix(repository_id: str, request: Cleanup
     if not prefix:
         raise HTTPException(status_code=400, detail="prefix is required")
 
-    matched_publications = [
-        publication.publication_id
-        for publication in store.all(repository_id=repository_id)
-        if _publication_matches_identifier_prefix(publication, prefix)
-    ]
+    matched_count = store.count_publications_by_identifier_prefix(prefix, repository_id=repository_id)
+    matched_publications = store.list_publication_ids_by_identifier_prefix(prefix, repository_id=repository_id, limit=100)
     removed = 0
-    if not request.dry_run and matched_publications:
-        removed = store.delete_publications(matched_publications, repository_id=repository_id)
+    if not request.dry_run and matched_count:
+        removed = store.delete_publications_by_identifier_prefix(prefix, repository_id=repository_id)
         _invalidate_opds_cache(repository_id)
 
     return {
@@ -1508,7 +1505,7 @@ def cleanup_repository_by_identifier_prefix(repository_id: str, request: Cleanup
         "repository_name": repository.name,
         "prefix": prefix,
         "dry_run": request.dry_run,
-        "matched_publications": len(matched_publications),
+        "matched_publications": matched_count,
         "removed_publications": removed,
         "remaining_publications": store.count(repository_id=repository_id),
         "matched_ids": matched_publications[:100],

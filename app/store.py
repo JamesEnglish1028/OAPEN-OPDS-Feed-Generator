@@ -527,6 +527,55 @@ class PublicationStore:
             session.commit()
             return int(result.rowcount or 0)
 
+    def list_publication_ids_by_identifier_prefix(
+        self,
+        prefix: str,
+        repository_id: str = "default",
+        limit: int = 100,
+    ) -> list[str]:
+        normalized_prefix = prefix.casefold()
+        with self._session() as session:
+            statement = (
+                select(PublicationRow.source_publication_id)
+                .where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.identifier.is_not(None),
+                    sqla_func.lower(PublicationRow.identifier).like(f"{normalized_prefix}%"),
+                )
+                .order_by(PublicationRow.source_publication_id.asc(), PublicationRow.publication_id.asc())
+                .limit(limit)
+            )
+            rows = session.scalars(statement).all()
+            return [row for row in rows if isinstance(row, str)]
+
+    def count_publications_by_identifier_prefix(self, prefix: str, repository_id: str = "default") -> int:
+        normalized_prefix = prefix.casefold()
+        with self._session() as session:
+            return int(
+                session.scalar(
+                    select(sqla_func.count())
+                    .select_from(PublicationRow)
+                    .where(
+                        PublicationRow.repository_id == repository_id,
+                        PublicationRow.identifier.is_not(None),
+                        sqla_func.lower(PublicationRow.identifier).like(f"{normalized_prefix}%"),
+                    )
+                )
+                or 0
+            )
+
+    def delete_publications_by_identifier_prefix(self, prefix: str, repository_id: str = "default") -> int:
+        normalized_prefix = prefix.casefold()
+        with self._session() as session:
+            statement = PublicationRow.__table__.delete().where(
+                PublicationRow.repository_id == repository_id,
+                PublicationRow.identifier.is_not(None),
+                sqla_func.lower(PublicationRow.identifier).like(f"{normalized_prefix}%"),
+            )
+            result = session.execute(statement)
+            session.commit()
+            return int(result.rowcount or 0)
+
     def clear_checkpoints(self, repository_id: str | None = None) -> None:
         with self._session() as session:
             statement = HarvestCheckpointRow.__table__.delete()
