@@ -173,6 +173,10 @@ class PublicationStore:
             return source_publication_id
         return f"{repository_id}::{source_publication_id}"
 
+    @staticmethod
+    def _collection_min_count(repository_id: str) -> int:
+        return 5 if repository_id == "default" else 2
+
     def initialize(self) -> None:
         Base.metadata.create_all(self._engine)
 
@@ -724,11 +728,12 @@ class PublicationStore:
     def list_collection_counts(self, repository_id: str = "default") -> list[dict[str, str | int]]:
         with self._session() as session:
             count_expr = sqla_func.count(PublicationRow.publication_id)
+            min_count = self._collection_min_count(repository_id)
             statement = (
                 select(PublicationRow.collection_slug, PublicationRow.collection, count_expr)
                 .where(PublicationRow.repository_id == repository_id, PublicationRow.collection_slug.is_not(None))
                 .group_by(PublicationRow.collection_slug, PublicationRow.collection)
-                .having(count_expr >= 2)
+                .having(count_expr >= min_count)
                 .order_by(PublicationRow.collection.asc())
             )
             rows = session.execute(statement).all()
@@ -741,6 +746,7 @@ class PublicationStore:
     ) -> list[dict[str, str | int]]:
         with self._session() as session:
             count_expr = sqla_func.count(PublicationRow.publication_id)
+            min_count = self._collection_min_count(repository_id)
             statement = (
                 select(PublicationRow.collection_slug, PublicationRow.collection, count_expr)
                 .where(
@@ -749,7 +755,7 @@ class PublicationStore:
                     PublicationRow.collection_slug.is_not(None),
                 )
                 .group_by(PublicationRow.collection_slug, PublicationRow.collection)
-                .having(count_expr >= 2)
+                .having(count_expr >= min_count)
                 .order_by(PublicationRow.collection.asc())
             )
             rows = session.execute(statement).all()
