@@ -9,7 +9,7 @@ def _lcc(term: str, code: str) -> dict[str, str]:
 
 
 def _lcsh(term: str) -> dict[str, str]:
-    return {"scheme": "LCSH", "term": term}
+    return {"scheme": "http://id.loc.gov/authorities/subjects", "term": term}
 
 
 # LCC navigation-oriented mappings (hierarchical class focus).
