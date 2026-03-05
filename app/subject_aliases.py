@@ -78,6 +78,17 @@ SUBJECT_ALIASES: dict[str, str] = {
     "kultur": "Culture",
     "medien": "Media",
     "literaturwissenschaft": "Literary Studies",
+    "literatur": "Literature",
+    "philosophie": "Philosophy",
+    "geschichte": "History",
+    "deutschland": "Germany",
+    "digitalisierung": "Digitalization",
+    "kulturgeschichte": "Cultural History",
+    "kulturwissenschaft": "Cultural Studies",
+    "linguistik": "Linguistics",
+    "slavische sprachwissenschaft": "Slavic Linguistics",
+    "europa": "Europe",
+    "russland": "Russia",
 }
 
 
