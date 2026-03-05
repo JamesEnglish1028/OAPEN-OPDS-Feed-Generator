@@ -1135,6 +1135,36 @@ class PublicationStore:
                 "top_subjects": top_subjects,
             }
 
+    def _subject_bucket_rows(
+        self,
+        repository_id: str,
+        *,
+        min_count: int,
+    ) -> list[tuple[str, str, int]]:
+        effective_min_count = max(min_count, 1)
+        with self._session() as session:
+            count_expr = sqla_func.count(sqla_func.distinct(PublicationSubjectRow.publication_id))
+            name_expr = sqla_func.max(PublicationSubjectRow.subject_name)
+            statement = (
+                select(
+                    PublicationSubjectRow.subject_slug,
+                    name_expr.label("subject_name"),
+                    count_expr.label("subject_count"),
+                )
+                .where(PublicationSubjectRow.repository_id == repository_id)
+                .group_by(PublicationSubjectRow.subject_slug)
+                .having(count_expr >= effective_min_count)
+                .order_by(count_expr.desc(), PublicationSubjectRow.subject_slug.asc())
+            )
+            rows = session.execute(statement).all()
+        normalized_rows: list[tuple[str, str, int]] = []
+        for slug, name, count in rows:
+            if not isinstance(slug, str) or not slug:
+                continue
+            normalized_name = name if isinstance(name, str) and name else slug
+            normalized_rows.append((slug, normalized_name, int(count)))
+        return normalized_rows
+
     def raw_subject_statistics(
         self,
         repository_id: str = "default",
@@ -1197,20 +1227,7 @@ class PublicationStore:
         if scheme_key not in {"lcc", "lcsh", "thema"}:
             raise ValueError("scheme must be one of: lcc, lcsh, thema")
 
-        with self._session() as session:
-            count_expr = sqla_func.count(sqla_func.distinct(PublicationSubjectRow.publication_id))
-            statement = (
-                select(
-                    PublicationSubjectRow.subject_slug,
-                    PublicationSubjectRow.subject_name,
-                    count_expr,
-                )
-                .where(PublicationSubjectRow.repository_id == repository_id)
-                .group_by(PublicationSubjectRow.subject_slug, PublicationSubjectRow.subject_name)
-                .having(count_expr >= effective_min_count)
-                .order_by(count_expr.desc(), PublicationSubjectRow.subject_name.asc())
-            )
-            rows = session.execute(statement).all()
+        rows = self._subject_bucket_rows(repository_id, min_count=effective_min_count)
 
         total_subject_buckets = 0
         mapped_subject_buckets = 0
@@ -1265,6 +1282,54 @@ class PublicationStore:
             "coverage_by_assignments": round(coverage_by_assignments, 6),
             "top_mapped": top_mapped,
             "top_unmapped": top_unmapped,
+        }
+
+    def subject_authority_unmapped(
+        self,
+        repository_id: str = "default",
+        *,
+        scheme: str = "lcc",
+        min_count: int = 1,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        effective_min_count = max(min_count, 1)
+        effective_limit = max(min(limit, 2000), 1)
+        effective_offset = max(offset, 0)
+        scheme_key = scheme.strip().casefold()
+        if scheme_key not in {"lcc", "lcsh", "thema"}:
+            raise ValueError("scheme must be one of: lcc, lcsh, thema")
+
+        rows = self._subject_bucket_rows(repository_id, min_count=effective_min_count)
+        unmapped: list[dict[str, Any]] = []
+        skipped = 0
+        total_unmapped = 0
+        for slug, name, count in rows:
+            if not isinstance(slug, str) or not slug or not isinstance(name, str) or not name:
+                continue
+            if scheme_key == "lcc":
+                mappings = resolve_lcc(name)
+            elif scheme_key == "lcsh":
+                mappings = resolve_lcsh(name)
+            else:
+                mappings = resolve_thema(name)
+            if mappings:
+                continue
+            total_unmapped += 1
+            if skipped < effective_offset:
+                skipped += 1
+                continue
+            if len(unmapped) >= effective_limit:
+                continue
+            unmapped.append({"slug": slug, "name": name, "count": int(count)})
+
+        return {
+            "scheme": scheme_key.upper(),
+            "minimum_count": effective_min_count,
+            "limit": effective_limit,
+            "offset": effective_offset,
+            "total_unmapped": total_unmapped,
+            "items": unmapped,
         }
 
     def page_by_subject_slug(

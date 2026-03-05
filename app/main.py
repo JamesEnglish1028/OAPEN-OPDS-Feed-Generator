@@ -3945,6 +3945,28 @@ def classification_authority_stats(
     return {"repository_id": repository_id, **stats}
 
 
+@app.get("/repositories/{repository_id}/classifications/authority-unmapped")
+def classification_authority_unmapped(
+    repository_id: str,
+    scheme: str = Query(default="lcc", pattern="^(?i)(lcc|lcsh|thema)$"),
+    min_count: int = Query(default=3, ge=1),
+    limit: int = Query(default=100, ge=1, le=2000),
+    offset: int = Query(default=0, ge=0),
+) -> dict:
+    _get_repository_or_404(repository_id)
+    try:
+        result = store.subject_authority_unmapped(
+            repository_id=repository_id,
+            scheme=scheme,
+            min_count=min_count,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"repository_id": repository_id, **result}
+
+
 @app.get("/repositories/{repository_id}/classifications/authority-resolve")
 def classification_authority_resolve(
     repository_id: str,

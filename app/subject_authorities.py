@@ -124,6 +124,14 @@ def _is_geographic_subject_key(key: str) -> bool:
     return any(token in {"europe", "africa", "america", "asia"} for token in tokens)
 
 
+def _freeze_mapping(mapping: dict[str, str]) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted(mapping.items()))
+
+
+def _thaw_mapping(frozen: tuple[tuple[str, str], ...]) -> dict[str, str]:
+    return {key: value for key, value in frozen}
+
+
 def _lcc(term: str, code: str) -> dict[str, str]:
     return {"scheme": "http://id.loc.gov", "term": term, "code": code}
 
@@ -363,73 +371,94 @@ def _canonical_key(subject_name: str) -> str:
     return subject_lookup_key(canonical)
 
 
-def resolve_lcc(subject_name: str) -> dict[str, str] | None:
-    key = _canonical_key(subject_name)
+@lru_cache(maxsize=32768)
+def _resolve_lcc_cached(key: str) -> tuple[tuple[str, str], ...] | None:
     if not key:
         return None
     direct = LCC_SUBJECT_MAP.get(key)
     if direct:
-        return dict(direct)
-    category = classify_subject_category(subject_name)
+        return _freeze_mapping(direct)
+    category = classify_subject_category(key)
     if not category:
         return None
     category_key = _canonical_key(category)
     mapped = LCC_SUBJECT_MAP.get(category_key)
-    return dict(mapped) if mapped else None
+    return _freeze_mapping(mapped) if mapped else None
 
 
-def resolve_lcsh(subject_name: str) -> list[dict[str, str]]:
-    key = _canonical_key(subject_name)
+@lru_cache(maxsize=32768)
+def _resolve_lcsh_cached(key: str) -> tuple[tuple[tuple[str, str], ...], ...]:
     if not key:
-        return []
+        return tuple()
     direct = LCSH_SUBJECT_MAP.get(key)
     if direct:
-        return [dict(item) for item in direct]
-    category = classify_subject_category(subject_name)
+        return tuple(_freeze_mapping(item) for item in direct)
+    category = classify_subject_category(key)
     if not category:
-        return []
+        return tuple()
     category_key = _canonical_key(category)
     mapped = LCSH_SUBJECT_MAP.get(category_key, [])
-    return [dict(item) for item in mapped]
+    return tuple(_freeze_mapping(item) for item in mapped)
 
 
-def resolve_thema(subject_name: str) -> list[dict[str, str]]:
+@lru_cache(maxsize=32768)
+def _resolve_thema_cached(key: str) -> tuple[tuple[tuple[str, str], ...], ...]:
     lookup = _thema_lookup()
-    mappings: list[dict[str, str]] = []
+    mappings: list[tuple[tuple[str, str], ...]] = []
     dedupe_codes: set[str] = set()
 
-    def _append(entries: list[dict[str, str]]) -> None:
+    def _append(entries: list[dict[str, str]] | tuple[tuple[tuple[str, str], ...], ...]) -> None:
         for entry in entries:
-            code = entry.get("code", "")
+            if isinstance(entry, tuple):
+                thawed = _thaw_mapping(entry)
+            else:
+                thawed = entry
+            code = thawed.get("code", "")
             if not code or code in dedupe_codes:
                 continue
             dedupe_codes.add(code)
-            mappings.append(dict(entry))
+            mappings.append(_freeze_mapping(thawed))
 
-    subject_key = _canonical_key(subject_name)
-    if subject_key:
-        _append(THEMA_STARTER_MAP.get(subject_key, []))
+    if key:
+        _append(THEMA_STARTER_MAP.get(key, []))
 
-    category = classify_subject_category(subject_name)
+    category = classify_subject_category(key)
     category_key = ""
     lcsh_keys: list[str] = []
-    if category and not _is_geographic_subject_key(subject_key):
+    if category and not _is_geographic_subject_key(key):
         category_key = _canonical_key(category)
         if category_key:
             _append(THEMA_CATEGORY_MAP.get(category_key, []))
 
     # Reuse LCSH terms as lexical hints into THEMA labels.
-    for mapping in resolve_lcsh(subject_name):
+    for frozen_mapping in _resolve_lcsh_cached(key):
+        mapping = _thaw_mapping(frozen_mapping)
         term = mapping.get("term", "")
-        key = _canonical_key(term)
-        if key:
-            lcsh_keys.append(key)
-            _append(THEMA_STARTER_MAP.get(key, []))
+        term_key = _canonical_key(term)
+        if term_key:
+            lcsh_keys.append(term_key)
+            _append(THEMA_STARTER_MAP.get(term_key, []))
 
     # Optional enrichment from remote THEMA label corpora.
-    for key in (subject_key, category_key, *lcsh_keys):
-        if not key:
+    for candidate_key in (key, category_key, *lcsh_keys):
+        if not candidate_key:
             continue
-        _append(lookup.get(key, []))
+        _append(lookup.get(candidate_key, []))
 
-    return mappings
+    return tuple(mappings)
+
+
+def resolve_lcc(subject_name: str) -> dict[str, str] | None:
+    key = _canonical_key(subject_name)
+    resolved = _resolve_lcc_cached(key)
+    return _thaw_mapping(resolved) if resolved else None
+
+
+def resolve_lcsh(subject_name: str) -> list[dict[str, str]]:
+    key = _canonical_key(subject_name)
+    return [_thaw_mapping(item) for item in _resolve_lcsh_cached(key)]
+
+
+def resolve_thema(subject_name: str) -> list[dict[str, str]]:
+    key = _canonical_key(subject_name)
+    return [_thaw_mapping(item) for item in _resolve_thema_cached(key)]
