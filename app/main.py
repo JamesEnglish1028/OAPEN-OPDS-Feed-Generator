@@ -1791,6 +1791,12 @@ def admin_ui() -> str:
       margin-top: 6px;
       color: var(--muted);
     }
+    .repo .source-url {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted);
+      word-break: break-word;
+    }
     .pill-row {
       display: flex;
       gap: 8px;
@@ -2142,8 +2148,36 @@ def admin_ui() -> str:
           '<input type="checkbox" data-directory-index="' + index + '">',
           '<span><strong>' + title + "</strong>" + group + '<br><small style="color: var(--muted);">' + entry.href + "</small></span>",
         ].join("");
+        const checkbox = row.querySelector("input[data-directory-index]");
+        if (checkbox) {
+          checkbox.addEventListener("change", () => {
+            maybeAutofillSplitRepositoryConfig();
+          });
+        }
         directoryList.appendChild(row);
       });
+    }
+
+    function maybeAutofillSplitRepositoryConfig() {
+      const mode = document.getElementById("directory-import-mode").value;
+      if (mode !== "split-repositories") {
+        return;
+      }
+      const selectedEntries = getCheckedDirectoryEntries();
+      if (selectedEntries.length !== 1) {
+        return;
+      }
+      const entry = selectedEntries[0];
+      const nextConfig = { url: entry.href };
+      const title = typeof entry.title === "string" ? entry.title.trim() : "";
+      const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+      document.getElementById("repo-config").value = JSON.stringify(nextConfig, null, 2);
+      if (slug) {
+        document.getElementById("repo-id").value = slug;
+      }
+      if (title) {
+        document.getElementById("repo-name").value = title;
+      }
     }
 
     function createDetailRow(label, value) {
@@ -2263,6 +2297,7 @@ def admin_ui() -> str:
           "items: " + (repo.publicationCount != null ? repo.publicationCount : 0),
           "checkpoints: " + (repo.checkpointCount != null ? repo.checkpointCount : 0)
         ];
+        const sourceUrl = repo && repo.config && typeof repo.config.url === "string" ? repo.config.url : "";
         const pills = [];
         if (repo.isDefaultRepository) {
           pills.push('<span class="pill default">Default Feed</span>');
@@ -2274,6 +2309,7 @@ def admin_ui() -> str:
           "<strong>" + repo.name + "</strong>",
           "<code>" + repo.repository_id + "</code>",
           "<small>" + metaBits.join(" | ") + "</small>",
+          sourceUrl ? '<div class="source-url"><strong>url:</strong> ' + sourceUrl + "</div>" : "",
           '<div class="pill-row">' + pills.join("") + "</div>"
         ].join("");
 
@@ -2545,11 +2581,15 @@ def admin_ui() -> str:
     document.getElementById("import-selected-directories").addEventListener("click", () => {
       importSelectedDirectories().catch((error) => show({ error: String(error) }));
     });
+    document.getElementById("directory-import-mode").addEventListener("change", () => {
+      maybeAutofillSplitRepositoryConfig();
+    });
     directorySelectAll.addEventListener("change", () => {
       const checked = directorySelectAll.checked;
       for (const input of directoryList.querySelectorAll("input[data-directory-index]")) {
         input.checked = checked;
       }
+      maybeAutofillSplitRepositoryConfig();
     });
     loadRepositories().catch((error) => show({ error: String(error) }));
     renderDirectoryEntries([]);
