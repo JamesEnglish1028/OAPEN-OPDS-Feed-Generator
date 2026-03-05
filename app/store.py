@@ -1337,6 +1337,51 @@ class PublicationStore:
             "items": unmapped,
         }
 
+    def list_lcc_heading_counts(
+        self,
+        *,
+        repository_id: str = "default",
+        min_count: int = 3,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        rows = self._subject_bucket_rows(repository_id, min_count=max(min_count, 1))
+        counts: dict[str, dict[str, Any]] = {}
+        for _, name, count in rows:
+            lcc = resolve_lcc(name)
+            if not lcc:
+                continue
+            code = lcc.get("code")
+            term = lcc.get("term")
+            if not isinstance(code, str) or not code:
+                continue
+            if not isinstance(term, str) or not term:
+                continue
+            top_code = code[0].upper()
+            bucket = counts.setdefault(top_code, {"code": top_code, "term": term, "count": 0})
+            bucket["count"] = int(bucket["count"]) + int(count)
+        items = sorted(counts.values(), key=lambda item: (-int(item["count"]), str(item["term"])))
+        normalized_offset = max(offset, 0)
+        normalized_limit = max(limit, 1)
+        return items[normalized_offset : normalized_offset + normalized_limit]
+
+    def count_lcc_heading_facets(
+        self,
+        *,
+        repository_id: str = "default",
+        min_count: int = 3,
+    ) -> int:
+        rows = self._subject_bucket_rows(repository_id, min_count=max(min_count, 1))
+        headings: set[str] = set()
+        for _, name, _ in rows:
+            lcc = resolve_lcc(name)
+            if not lcc:
+                continue
+            code = lcc.get("code")
+            if isinstance(code, str) and code:
+                headings.add(code[0].upper())
+        return len(headings)
+
     def page_by_subject_slug(
         self,
         subject_slug: str,

@@ -837,6 +837,139 @@ def _build_classifications_index_response(
     }
 
 
+def _build_languages_index_response(
+    *,
+    request: Request,
+    repository_id: str,
+    path: str,
+    page: int,
+    page_size: int,
+) -> dict:
+    offset = (page - 1) * page_size
+    all_languages = store.list_language_counts(repository_id=repository_id)
+    total = len(all_languages)
+    items = all_languages[offset : offset + page_size]
+    last_page = max(1, (total + page_size - 1) // page_size) if page_size > 0 else 1
+    start_path = "/opds" if repository_id == DEFAULT_REPOSITORY_ID else f"/repositories/{repository_id}/opds"
+    language_prefix = _language_path_prefix(repository_id)
+    links = [
+        {"rel": "self", "href": _build_url(request, path, {"page": page, "page_size": page_size}), "type": "application/opds+json"},
+        {"rel": "start", "href": _build_url(request, start_path, {}), "type": "application/opds+json"},
+        {"rel": "first", "href": _build_url(request, path, {"page": 1, "page_size": page_size}), "type": "application/opds+json"},
+        {"rel": "last", "href": _build_url(request, path, {"page": last_page, "page_size": page_size}), "type": "application/opds+json"},
+    ]
+    if path != start_path:
+        links.append({"rel": "up", "href": _build_url(request, start_path, {}), "type": "application/opds+json"})
+    if page > 1:
+        links.append(
+            {
+                "rel": "previous",
+                "href": _build_url(request, path, {"page": page - 1, "page_size": page_size}),
+                "type": "application/opds+json",
+            }
+        )
+    if page < last_page:
+        links.append(
+            {
+                "rel": "next",
+                "href": _build_url(request, path, {"page": page + 1, "page_size": page_size}),
+                "type": "application/opds+json",
+            }
+        )
+    navigation = [
+        {
+            "href": _build_url(request, f"{language_prefix}/{item['code']}", {}),
+            "type": "application/opds+json",
+            "title": _language_label(str(item["code"])),
+            "rel": "subsection",
+            "properties": {"numberOfItems": int(item["count"])},
+        }
+        for item in items
+    ]
+    return {
+        "metadata": {
+            "@type": "http://schema.org/DataFeed",
+            "title": "Languages",
+            "numberOfItems": total,
+            "itemsPerPage": len(navigation),
+            "currentPage": page,
+            "repositoryId": repository_id,
+        },
+        "links": links,
+        "navigation": navigation,
+    }
+
+
+def _build_lcc_index_response(
+    *,
+    request: Request,
+    repository_id: str,
+    path: str,
+    page: int,
+    page_size: int,
+) -> dict:
+    offset = (page - 1) * page_size
+    total = store.count_lcc_heading_facets(repository_id=repository_id, min_count=3)
+    items = store.list_lcc_heading_counts(
+        repository_id=repository_id,
+        min_count=3,
+        limit=page_size,
+        offset=offset,
+    )
+    last_page = max(1, (total + page_size - 1) // page_size) if page_size > 0 else 1
+    start_path = "/opds" if repository_id == DEFAULT_REPOSITORY_ID else f"/repositories/{repository_id}/opds"
+    if repository_id == DEFAULT_REPOSITORY_ID:
+        search_path = "/opds/search"
+    else:
+        search_path = f"/repositories/{repository_id}/opds/search"
+    links = [
+        {"rel": "self", "href": _build_url(request, path, {"page": page, "page_size": page_size}), "type": "application/opds+json"},
+        {"rel": "start", "href": _build_url(request, start_path, {}), "type": "application/opds+json"},
+        {"rel": "first", "href": _build_url(request, path, {"page": 1, "page_size": page_size}), "type": "application/opds+json"},
+        {"rel": "last", "href": _build_url(request, path, {"page": last_page, "page_size": page_size}), "type": "application/opds+json"},
+    ]
+    if path != start_path:
+        links.append({"rel": "up", "href": _build_url(request, start_path, {}), "type": "application/opds+json"})
+    if page > 1:
+        links.append(
+            {
+                "rel": "previous",
+                "href": _build_url(request, path, {"page": page - 1, "page_size": page_size}),
+                "type": "application/opds+json",
+            }
+        )
+    if page < last_page:
+        links.append(
+            {
+                "rel": "next",
+                "href": _build_url(request, path, {"page": page + 1, "page_size": page_size}),
+                "type": "application/opds+json",
+            }
+        )
+    navigation = [
+        {
+            "href": _build_url(request, search_path, {"subject": item["term"]}),
+            "type": "application/opds+json",
+            "title": f"{item['term']} ({item['code']})",
+            "rel": "subsection",
+            "properties": {"numberOfItems": int(item["count"])},
+        }
+        for item in items
+    ]
+    return {
+        "metadata": {
+            "@type": "http://schema.org/DataFeed",
+            "title": "LCC Top-Level Subjects",
+            "numberOfItems": total,
+            "itemsPerPage": len(navigation),
+            "currentPage": page,
+            "repositoryId": repository_id,
+        },
+        "links": links,
+        "navigation": navigation,
+    }
+
+
 def _build_subclassifications_index_response(
     *,
     request: Request,
@@ -921,6 +1054,18 @@ def _language_path_prefix(repository_id: str) -> str:
     if repository_id == DEFAULT_REPOSITORY_ID:
         return "/opds/languages"
     return f"/repositories/{repository_id}/opds/languages"
+
+
+def _language_index_path(repository_id: str) -> str:
+    if repository_id == DEFAULT_REPOSITORY_ID:
+        return "/opds/navigation/languages"
+    return f"/repositories/{repository_id}/opds/navigation/languages"
+
+
+def _lcc_index_path(repository_id: str) -> str:
+    if repository_id == DEFAULT_REPOSITORY_ID:
+        return "/opds/navigation/lcc"
+    return f"/repositories/{repository_id}/opds/navigation/lcc"
 
 
 def _classification_path_prefix(repository_id: str) -> str:
@@ -2555,29 +2700,89 @@ def _opds_feed_for_repository(
         )
 
         languages = store.list_language_counts(repository_id=repository_id)
-        year_counts = store.list_publication_year_counts(repository_id=repository_id)
+        lcc_headings = store.list_lcc_heading_counts(repository_id=repository_id, min_count=3, limit=10, offset=0)
+        collection_items = store.list_collection_counts_limited(
+            repository_id=repository_id,
+            limit=10,
+            offset=0,
+            order_by_count_desc=True,
+        )
 
-        if repository_id == DEFAULT_REPOSITORY_ID:
-            year_path_prefix = "/opds/years"
-        else:
-            year_path_prefix = f"/repositories/{repository_id}/opds/years"
-
-        year_navigation_links = [
+        language_group_links = [
             {
-                "href": _build_url(request, f"{year_path_prefix}/{item['year']}", {}),
-                "title": str(item["year"]),
+                "href": _build_url(request, f"{_language_path_prefix(repository_id)}/{item['code']}", {}),
+                "title": _language_label(str(item["code"])),
                 "type": "application/opds+json",
                 "rel": "subsection",
                 "properties": {"numberOfItems": int(item["count"])},
             }
-            for item in year_counts
+            for item in languages[:10]
         ]
+        language_group_links.append(
+            {
+                "href": _build_url(request, _language_index_path(repository_id), {}),
+                "title": "Browse All Languages",
+                "type": "application/opds+json",
+                "rel": "collection",
+            }
+        )
+
+        if repository_id == DEFAULT_REPOSITORY_ID:
+            search_path = "/opds/search"
+        else:
+            search_path = f"/repositories/{repository_id}/opds/search"
+        lcc_group_links = [
+            {
+                "href": _build_url(request, search_path, {"subject": item["term"]}),
+                "title": f"{item['term']} ({item['code']})",
+                "type": "application/opds+json",
+                "rel": "subsection",
+                "properties": {"numberOfItems": int(item["count"])},
+            }
+            for item in lcc_headings
+        ]
+        lcc_group_links.append(
+            {
+                "href": _build_url(request, _lcc_index_path(repository_id), {}),
+                "title": "Browse All LCC Headings",
+                "type": "application/opds+json",
+                "rel": "collection",
+            }
+        )
+
+        collection_group_links = [
+            {
+                "href": _build_url(request, f"{_collections_index_path(repository_id)}/{item['slug']}", {}),
+                "title": item["name"],
+                "type": "application/opds+json",
+                "rel": "subsection",
+                "properties": {"numberOfItems": int(item["count"])},
+            }
+            for item in collection_items
+        ]
+        collection_group_links.append(
+            {
+                "href": _build_url(request, _collections_index_path(repository_id), {}),
+                "title": "Browse All Collections",
+                "type": "application/opds+json",
+                "rel": "collection",
+            }
+        )
+
         response.pop("navigation", None)
         response["groups"] = [
             {
-                "metadata": {"title": "Publication Year"},
-                "navigation": year_navigation_links,
-            }
+                "metadata": {"title": "Language"},
+                "navigation": language_group_links,
+            },
+            {
+                "metadata": {"title": "LCC Top-Level Subjects"},
+                "navigation": lcc_group_links,
+            },
+            {
+                "metadata": {"title": "Collections"},
+                "navigation": collection_group_links,
+            },
         ]
         response = _attach_language_facets(request=request, response=response, language_counts=languages, repository_id=repository_id)
         return _attach_browse_facets(request=request, response=response, repository_id=repository_id)
@@ -2626,6 +2831,84 @@ def opds_feed_default_alias(
     page_size: int = Query(default=50, ge=1, le=500),
 ) -> dict:
     return opds_feed(request=request, page=page, page_size=page_size)
+
+
+@app.get("/opds/navigation/languages")
+def opds_languages_index(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    def build_response() -> dict:
+        return _build_languages_index_response(
+            request=request,
+            repository_id=DEFAULT_REPOSITORY_ID,
+            path="/opds/navigation/languages",
+            page=page,
+            page_size=page_size,
+        )
+
+    return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
+
+
+@app.get("/repositories/{repository_id}/opds/navigation/languages")
+def opds_languages_index_repository(
+    repository_id: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    _get_repository_or_404(repository_id)
+
+    def build_response() -> dict:
+        return _build_languages_index_response(
+            request=request,
+            repository_id=repository_id,
+            path=f"/repositories/{repository_id}/opds/navigation/languages",
+            page=page,
+            page_size=page_size,
+        )
+
+    return _cached_opds_response(request, build_response, repository_id=repository_id)
+
+
+@app.get("/opds/navigation/lcc")
+def opds_lcc_index(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    def build_response() -> dict:
+        return _build_lcc_index_response(
+            request=request,
+            repository_id=DEFAULT_REPOSITORY_ID,
+            path="/opds/navigation/lcc",
+            page=page,
+            page_size=page_size,
+        )
+
+    return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
+
+
+@app.get("/repositories/{repository_id}/opds/navigation/lcc")
+def opds_lcc_index_repository(
+    repository_id: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    _get_repository_or_404(repository_id)
+
+    def build_response() -> dict:
+        return _build_lcc_index_response(
+            request=request,
+            repository_id=repository_id,
+            path=f"/repositories/{repository_id}/opds/navigation/lcc",
+            page=page,
+            page_size=page_size,
+        )
+
+    return _cached_opds_response(request, build_response, repository_id=repository_id)
 
 
 def _search_feed_for_repository(
