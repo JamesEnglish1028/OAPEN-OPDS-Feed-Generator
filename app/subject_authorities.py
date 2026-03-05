@@ -4,6 +4,16 @@ from app.subject_aliases import subject_lookup_key
 from app.subject_categories import classify_subject_category
 
 
+THEMA_REFERENCE_URLS: dict[str, str] = {
+    "en": "https://www.editeur.org/files/Thema/1.6/v1.6_en/20250410_Thema_v1.6_en.json",
+    "de": "https://www.editeur.org/files/Thema/1.6/v1.6_de/20251215_Thema_v1.6_de.json",
+    "da": "https://www.editeur.org/files/Thema/1.6/v1.6_da/20250415_Thema_v1.6_da.json",
+    "nl": "https://www.editeur.org/files/Thema/1.6/v1.6_nl/20250512_Thema_v1.6_nl.json",
+    "fr": "https://www.editeur.org/files/Thema/1.6/v1.6_fr/20251202_Thema_v1.6_fr.json",
+    "it": "https://www.editeur.org/files/Thema/1.6/v1.6_it/20250529_Thema_v1.6_it.json",
+}
+
+
 def _lcc(term: str, code: str) -> dict[str, str]:
     return {"scheme": "http://id.loc.gov", "term": term, "code": code}
 
