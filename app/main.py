@@ -1903,6 +1903,30 @@ def admin_ui() -> str:
       font-size: 14px;
       line-height: 1.5;
     }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: rgba(31, 41, 51, 0.08);
+      color: var(--ink);
+    }
+    .status-pill.running {
+      background: rgba(162, 62, 42, 0.14);
+      color: var(--accent);
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
     @media (max-width: 720px) {
       .manage-grid { grid-template-columns: 1fr; }
       .row, .row-3 { grid-template-columns: 1fr; }
@@ -1992,10 +2016,11 @@ def admin_ui() -> str:
             <label class="check"><input id="harvest-follow-next" type="checkbox" checked> Follow <code>rel: next</code> links</label>
             <label class="check"><input id="harvest-incremental" type="checkbox" checked> Persist checkpoint for scheduled harvests</label>
             <div class="actions">
-              <button type="submit" class="secondary">Start Harvest</button>
+              <button type="submit" class="secondary" id="start-harvest">Start Harvest</button>
               <button type="button" class="ghost" id="fetch-directories">Fetch Directories</button>
               <button type="button" class="ghost" id="load-checkpoints">Load Checkpoints</button>
             </div>
+            <p id="harvest-action-hint" class="hint" style="margin: 6px 0 0;">Enter a feed URL to begin.</p>
             <div style="margin-top:14px;">
               <label>Import Strategy</label>
               <label class="check"><input id="directory-mode-split" type="radio" name="directory_import_mode" value="split-repositories" checked> Create one repository per selected directory</label>
@@ -2009,6 +2034,10 @@ def admin_ui() -> str:
             <div class="actions" style="margin-top:10px;">
               <button type="button" id="import-as-repositories">Create Repositories</button>
               <button type="button" id="import-into-repository" class="secondary">Import Into Selected Repository</button>
+            </div>
+            <div id="harvest-status" class="status-pill" aria-live="polite">
+              <span class="dot"></span>
+              <span id="harvest-status-text">Idle</span>
             </div>
           </form>
         </div>
@@ -2025,6 +2054,9 @@ def admin_ui() -> str:
         <div class="card">
           <h2>Known Repositories</h2>
           <p id="repo-summary" class="summary">Loading repositories...</p>
+          <div class="actions" style="margin-bottom:10px;">
+            <button type="button" class="ghost" id="refresh-repos-manage">Refresh Repository List</button>
+          </div>
           <p class="hint">Select a repository to inspect it on the right. Use the selected panel for management actions such as subject reindex, clear, delete, or loading config into the edit form.</p>
           <div id="repo-list" class="list"></div>
         </div>
@@ -2061,10 +2093,19 @@ def admin_ui() -> str:
     const repoDetailActions = document.getElementById("repo-detail-actions");
     const directoryList = document.getElementById("directory-list");
     const directorySelectAll = document.getElementById("directory-select-all");
+    const startHarvestButton = document.getElementById("start-harvest");
+    const fetchDirectoriesButton = document.getElementById("fetch-directories");
+    const loadCheckpointsButton = document.getElementById("load-checkpoints");
+    const importAsRepositoriesButton = document.getElementById("import-as-repositories");
+    const importIntoRepositoryButton = document.getElementById("import-into-repository");
+    const harvestActionHint = document.getElementById("harvest-action-hint");
+    const harvestStatus = document.getElementById("harvest-status");
+    const harvestStatusText = document.getElementById("harvest-status-text");
     const output = document.getElementById("output");
     const subjectBackfillCursors = {};
     let directoryEntries = [];
     let selectedRepository = null;
+    let harvestBusy = false;
 
     function show(data) {
       output.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
@@ -2135,6 +2176,18 @@ def admin_ui() -> str:
       return selected.value;
     }
 
+    function setHarvestBusy(isBusy, label) {
+      harvestBusy = isBusy;
+      if (isBusy) {
+        harvestStatus.classList.add("running");
+        harvestStatusText.textContent = label || "Running";
+      } else {
+        harvestStatus.classList.remove("running");
+        harvestStatusText.textContent = "Idle";
+      }
+      updateHarvestActionState();
+    }
+
     function updateDirectoryImportSummary() {
       const summary = document.getElementById("directory-import-summary");
       const selectedEntries = getCheckedDirectoryEntries();
@@ -2152,14 +2205,74 @@ def admin_ui() -> str:
       summary.textContent = "This will import " + selectedCount + " directories into repository '" + targetRepository + "' as collections.";
     }
 
+    function updateHarvestActionState() {
+      const url = document.getElementById("harvest-url").value.trim();
+      const hasUrl = Boolean(url);
+      const hasRepository = Boolean(repoSelect.value);
+      const selectedCount = getCheckedDirectoryEntries().length;
+      const mode = currentDirectoryImportMode();
+
+      const manageRefreshButton = document.getElementById("refresh-repos-manage");
+      fetchDirectoriesButton.disabled = harvestBusy || !hasUrl;
+      loadCheckpointsButton.disabled = harvestBusy || !hasRepository;
+      manageRefreshButton.disabled = harvestBusy;
+      directorySelectAll.disabled = directoryEntries.length === 0;
+
+      if (!hasUrl) {
+        startHarvestButton.disabled = true;
+        importAsRepositoriesButton.disabled = true;
+        importIntoRepositoryButton.disabled = true;
+        if (harvestBusy) {
+          harvestActionHint.textContent = "Harvest is running...";
+          return;
+        }
+        harvestActionHint.textContent = "Enter a feed URL to begin.";
+        return;
+      }
+
+      if (!hasRepository) {
+        startHarvestButton.disabled = true;
+        importAsRepositoriesButton.disabled = true;
+        importIntoRepositoryButton.disabled = true;
+        if (harvestBusy) {
+          harvestActionHint.textContent = "Harvest is running...";
+          return;
+        }
+        harvestActionHint.textContent = "Select a repository to run ingest actions.";
+        return;
+      }
+
+      if (selectedCount > 0) {
+        startHarvestButton.disabled = true;
+        importAsRepositoriesButton.disabled = harvestBusy || !(mode === "split-repositories");
+        importIntoRepositoryButton.disabled = harvestBusy || !(mode === "single-repository-collections");
+        if (harvestBusy) {
+          harvestActionHint.textContent = "Harvest is running...";
+          return;
+        }
+        if (mode === "split-repositories") {
+          harvestActionHint.textContent = "Directories selected: use 'Create Repositories' to import them.";
+        } else {
+          harvestActionHint.textContent = "Directories selected: use 'Import Into Selected Repository' to ingest as collections.";
+        }
+        return;
+      }
+
+      startHarvestButton.disabled = harvestBusy ? true : false;
+      importAsRepositoriesButton.disabled = true;
+      importIntoRepositoryButton.disabled = true;
+      if (harvestBusy) {
+        harvestActionHint.textContent = "Harvest is running...";
+        return;
+      }
+      harvestActionHint.textContent = "No directories selected: use 'Start Harvest' for direct single-feed ingest, or fetch/select directories first.";
+    }
+
     function syncDirectoryImportModeUi() {
       const mode = currentDirectoryImportMode();
-      const splitButton = document.getElementById("import-as-repositories");
-      const singleButton = document.getElementById("import-into-repository");
-      splitButton.disabled = mode !== "split-repositories";
-      singleButton.disabled = mode !== "single-repository-collections";
       maybeAutofillSplitRepositoryConfig();
       updateDirectoryImportSummary();
+      updateHarvestActionState();
     }
 
     function renderDirectoryEntries(entries) {
@@ -2188,11 +2301,13 @@ def admin_ui() -> str:
           checkbox.addEventListener("change", () => {
             maybeAutofillSplitRepositoryConfig();
             updateDirectoryImportSummary();
+            updateHarvestActionState();
           });
         }
         directoryList.appendChild(row);
       });
       updateDirectoryImportSummary();
+      updateHarvestActionState();
     }
 
     function maybeAutofillSplitRepositoryConfig() {
@@ -2372,6 +2487,7 @@ def admin_ui() -> str:
         detailRepository = repositories.find((repo) => repo.repository_id === selectedRepositoryId) || null;
       }
       renderRepositoryDetail(detailRepository);
+      updateHarvestActionState();
     }
 
     async function backfillSubjects(explicitRepositoryId) {
@@ -2515,25 +2631,30 @@ def admin_ui() -> str:
 
     async function runHarvest(event) {
       event.preventDefault();
-      const repositoryId = repoSelect.value;
-      const body = {
-        url: document.getElementById("harvest-url").value.trim(),
-        follow_next: document.getElementById("harvest-follow-next").checked,
-        incremental: document.getElementById("harvest-incremental").checked,
-        timeout_seconds: Number(document.getElementById("harvest-timeout").value) || 120,
-      };
-      const maxPages = document.getElementById("harvest-max-pages").value.trim();
-      const maxRecords = document.getElementById("harvest-max-records").value.trim();
-      if (maxPages) body.max_pages = Number(maxPages);
-      if (maxRecords) body.max_records = Number(maxRecords);
+      setHarvestBusy(true, "Harvesting");
+      try {
+        const repositoryId = repoSelect.value;
+        const body = {
+          url: document.getElementById("harvest-url").value.trim(),
+          follow_next: document.getElementById("harvest-follow-next").checked,
+          incremental: document.getElementById("harvest-incremental").checked,
+          timeout_seconds: Number(document.getElementById("harvest-timeout").value) || 120,
+        };
+        const maxPages = document.getElementById("harvest-max-pages").value.trim();
+        const maxRecords = document.getElementById("harvest-max-records").value.trim();
+        if (maxPages) body.max_pages = Number(maxPages);
+        if (maxRecords) body.max_records = Number(maxRecords);
 
-      const response = await fetch("/repositories/" + encodeURIComponent(repositoryId) + "/ingest/opds-json", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await readJson(response);
-      show(data);
+        const response = await fetch("/repositories/" + encodeURIComponent(repositoryId) + "/ingest/opds-json", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await readJson(response);
+        show(data);
+      } finally {
+        setHarvestBusy(false);
+      }
     }
 
     async function fetchDirectories() {
@@ -2542,16 +2663,21 @@ def admin_ui() -> str:
         show({ error: "Enter a remote feed URL first." });
         return;
       }
-      const timeoutSeconds = Number(document.getElementById("harvest-timeout").value) || 120;
-      const response = await fetch("/ingest/opds-json/directories", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url, timeout_seconds: timeoutSeconds }),
-      });
-      const data = await readJson(response);
-      show(data);
-      if (response.ok) {
-        renderDirectoryEntries(data.directories || []);
+      setHarvestBusy(true, "Fetching");
+      try {
+        const timeoutSeconds = Number(document.getElementById("harvest-timeout").value) || 120;
+        const response = await fetch("/ingest/opds-json/directories", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: url, timeout_seconds: timeoutSeconds }),
+        });
+        const data = await readJson(response);
+        show(data);
+        if (response.ok) {
+          renderDirectoryEntries(data.directories || []);
+        }
+      } finally {
+        setHarvestBusy(false);
       }
     }
 
@@ -2561,36 +2687,42 @@ def admin_ui() -> str:
         show({ error: "Select at least one directory to import." });
         return;
       }
-      const mode = modeOverride || currentDirectoryImportMode();
-      const payload = {
-        root_url: document.getElementById("harvest-url").value.trim(),
-        directories: selectedEntries.map((entry) => ({
-          title: entry.title || entry.href,
-          href: entry.href,
-        })),
-        mode: mode,
-        follow_next: document.getElementById("harvest-follow-next").checked,
-        incremental: document.getElementById("harvest-incremental").checked,
-        timeout_seconds: Number(document.getElementById("harvest-timeout").value) || 120,
-      };
-      const maxPages = document.getElementById("harvest-max-pages").value.trim();
-      const maxRecords = document.getElementById("harvest-max-records").value.trim();
-      if (maxPages) payload.max_pages = Number(maxPages);
-      if (maxRecords) payload.max_records = Number(maxRecords);
-      if (mode === "single-repository-collections") {
-        payload.target_repository_id = repoSelect.value;
-      }
+      setHarvestBusy(true, "Importing");
+      try {
+        const mode = modeOverride || currentDirectoryImportMode();
+        const payload = {
+          root_url: document.getElementById("harvest-url").value.trim(),
+          directories: selectedEntries.map((entry) => ({
+            title: entry.title || entry.href,
+            href: entry.href,
+          })),
+          mode: mode,
+          follow_next: document.getElementById("harvest-follow-next").checked,
+          incremental: document.getElementById("harvest-incremental").checked,
+          timeout_seconds: Number(document.getElementById("harvest-timeout").value) || 120,
+        };
+        const maxPages = document.getElementById("harvest-max-pages").value.trim();
+        const maxRecords = document.getElementById("harvest-max-records").value.trim();
+        if (maxPages) payload.max_pages = Number(maxPages);
+        if (maxRecords) payload.max_records = Number(maxRecords);
+        if (mode === "single-repository-collections") {
+          payload.target_repository_id = repoSelect.value;
+        }
 
-      const response = await fetch("/ingest/opds-json/directories/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await readJson(response);
-      show(data);
-      if (response.ok) {
-        await refreshRepositoriesSilently(repoSelect.value);
-        updateDirectoryImportSummary();
+        const response = await fetch("/ingest/opds-json/directories/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await readJson(response);
+        show(data);
+        if (response.ok) {
+          await refreshRepositoriesSilently(repoSelect.value);
+          updateDirectoryImportSummary();
+          updateHarvestActionState();
+        }
+      } finally {
+        setHarvestBusy(false);
       }
     }
 
@@ -2609,6 +2741,12 @@ def admin_ui() -> str:
     });
     document.getElementById("refresh-repos").addEventListener("click", () => {
       loadRepositories().catch((error) => show({ error: String(error) }));
+    });
+    document.getElementById("refresh-repos-manage").addEventListener("click", () => {
+      loadRepositories().catch((error) => show({ error: String(error) }));
+    });
+    document.getElementById("harvest-url").addEventListener("input", () => {
+      updateHarvestActionState();
     });
     document.getElementById("load-checkpoints").addEventListener("click", () => {
       loadCheckpoints().catch((error) => show({ error: String(error) }));
@@ -2630,6 +2768,7 @@ def admin_ui() -> str:
     });
     repoSelect.addEventListener("change", () => {
       updateDirectoryImportSummary();
+      updateHarvestActionState();
     });
     directorySelectAll.addEventListener("change", () => {
       const checked = directorySelectAll.checked;
@@ -2638,10 +2777,12 @@ def admin_ui() -> str:
       }
       maybeAutofillSplitRepositoryConfig();
       updateDirectoryImportSummary();
+      updateHarvestActionState();
     });
     loadRepositories().catch((error) => show({ error: String(error) }));
     renderDirectoryEntries([]);
     syncDirectoryImportModeUi();
+    updateHarvestActionState();
   </script>
 </body>
 </html>"""
