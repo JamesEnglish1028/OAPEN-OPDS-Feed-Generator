@@ -77,6 +77,7 @@ SUBJECT_ALIASES: dict[str, str] = {
     "gesellschaft": "Society",
     "kultur": "Culture",
     "medien": "Media",
+    "medienwissenschaft": "Media Studies",
     "literaturwissenschaft": "Literary Studies",
     "literatur": "Literature",
     "philosophie": "Philosophy",
@@ -110,6 +111,10 @@ SUBJECT_ALIASES: dict[str, str] = {
     "film": "Media Studies",
     "overheidsbeleid": "Public Policy",
     "literary criticism": "Literary Criticism",
+    "bildungsforschung": "Education Research",
+    "philologie": "Linguistics",
+    "business economics": "Business & Economics",
+    "space": "Science",
 }
 
 

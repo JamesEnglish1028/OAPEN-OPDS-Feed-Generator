@@ -32,6 +32,7 @@ THEMA_STARTER_MAP: dict[str, list[dict[str, str]]] = {
     "sociology": [_thema("Sociology", "JHB")],
     "anthropology": [_thema("Sociology and anthropology", "JH")],
     "education": [_thema("Education", "JN")],
+    "education research": [_thema("Education", "JN")],
     "philosophy": [_thema("Philosophy", "QD")],
     "religion": [_thema("Religion and beliefs", "QR")],
     "islam": [_thema("Islam", "QRSF")],
@@ -53,6 +54,7 @@ THEMA_STARTER_MAP: dict[str, list[dict[str, str]]] = {
     "gender studies": [_thema("Gender studies: women and girls", "JBSF1")],
     "migration": [_thema("Migration, immigration and emigration", "JBFH")],
     "science": [_thema("Science: general issues", "PD")],
+    "space": [_thema("Science: general issues", "PD")],
     "mathematics": [_thema("Mathematics", "PB")],
     "artificial intelligence": [_thema("Artificial intelligence", "UB")],
     "technology": [_thema("Technology, engineering, agriculture", "T")],
@@ -84,6 +86,7 @@ THEMA_STARTER_MAP: dict[str, list[dict[str, str]]] = {
     "slavic linguistics": [_thema("Language, linguistics and communication", "C")],
     "architecture": [_thema("The arts", "A")],
     "open access": [_thema("Library and information studies / archivistics", "GL")],
+    "textbook": [_thema("Education", "JN")],
 }
 
 THEMA_CATEGORY_MAP: dict[str, list[dict[str, str]]] = {
