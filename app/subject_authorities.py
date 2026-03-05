@@ -5,7 +5,7 @@ from app.subject_categories import classify_subject_category
 
 
 def _lcc(term: str, code: str) -> dict[str, str]:
-    return {"scheme": "LCC", "term": term, "code": code}
+    return {"scheme": "http://id.loc.gov", "term": term, "code": code}
 
 
 def _lcsh(term: str) -> dict[str, str]:
@@ -121,4 +121,3 @@ def resolve_lcsh(subject_name: str) -> list[dict[str, str]]:
     category_key = _canonical_key(category)
     mapped = LCSH_SUBJECT_MAP.get(category_key, [])
     return [dict(item) for item in mapped]
-
