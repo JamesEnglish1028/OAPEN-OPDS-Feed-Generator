@@ -115,6 +115,19 @@ SUBJECT_ALIASES: dict[str, str] = {
     "philologie": "Linguistics",
     "business economics": "Business & Economics",
     "space": "Science",
+    "human rights": "Human Rights",
+    "sustainable development": "Sustainable Development",
+    "international relations": "International Relations",
+    "ethnography": "Ethnography",
+    "economy": "Economics",
+    "aesthetics": "Aesthetics",
+    "identity": "Identity",
+    "development": "Development",
+    "public administration": "Public Administration",
+    "ecology": "Ecology",
+    "poetry": "Poetry",
+    "covid 19": "COVID-19",
+    "violence": "Violence",
 }
 
 

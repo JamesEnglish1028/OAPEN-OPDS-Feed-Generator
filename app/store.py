@@ -1161,7 +1161,12 @@ class PublicationStore:
         for slug, name, count in rows:
             if not isinstance(slug, str) or not slug:
                 continue
-            normalized_name = name if isinstance(name, str) and name else slug
+            if isinstance(name, str) and name:
+                normalized_name = canonicalize_subject_term(name).strip(" .,!?:;")
+            else:
+                normalized_name = slug
+            if not normalized_name:
+                normalized_name = slug
             normalized_rows.append((slug, normalized_name, int(count)))
         return normalized_rows
 
