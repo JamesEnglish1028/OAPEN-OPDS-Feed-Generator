@@ -20,16 +20,78 @@ THEMA_REFERENCE_URLS: dict[str, str] = {
 }
 
 
+def _thema(term: str, code: str) -> dict[str, str]:
+    return {"scheme": THEMA_SCHEME_URI, "term": term, "code": code}
+
+
+THEMA_STARTER_MAP: dict[str, list[dict[str, str]]] = {
+    "history": [_thema("History", "NH")],
+    "archaeology": [_thema("Archaeology", "NK")],
+    "politics": [_thema("Politics and government", "JP")],
+    "political science": [_thema("Political science and theory", "JPA")],
+    "sociology": [_thema("Sociology", "JHB")],
+    "anthropology": [_thema("Sociology and anthropology", "JH")],
+    "education": [_thema("Education", "JN")],
+    "philosophy": [_thema("Philosophy", "QD")],
+    "religion": [_thema("Religion and beliefs", "QR")],
+    "islam": [_thema("Islam", "QRSF")],
+    "law": [_thema("Law", "L")],
+    "literature": [_thema("Literature, literary studies and rhetoric", "DS")],
+    "literary studies": [_thema("Literary studies: prose, narrative and genres", "DSA")],
+    "literary criticism": [_thema("Literary studies: prose, narrative and genres", "DSA")],
+    "culture": [_thema("Society and culture: general", "JB")],
+    "cultural studies": [_thema("Society and culture: general", "JB")],
+    "media": [_thema("Media studies", "JFD")],
+    "media studies": [_thema("Media studies", "JFD")],
+    "communication": [_thema("Communication studies", "JFC")],
+    "psychology": [_thema("Psychology", "JM")],
+    "gender": [_thema("Gender studies: women and girls", "JBSF1")],
+    "gender studies": [_thema("Gender studies: women and girls", "JBSF1")],
+    "migration": [_thema("Migration, immigration and emigration", "JBFH")],
+    "science": [_thema("Science: general issues", "PD")],
+    "mathematics": [_thema("Mathematics", "PB")],
+    "artificial intelligence": [_thema("Artificial intelligence", "UB")],
+    "technology": [_thema("Technology, engineering, agriculture", "T")],
+    "digitalization": [_thema("Digital technology: general", "UBJ")],
+    "digital media": [_thema("Digital media and online communication", "JFDU")],
+    "earth & environment": [_thema("Earth sciences, geography, environment, planning", "R")],
+    "environment": [_thema("The environment", "RNK")],
+    "medicine": [_thema("Medicine and nursing", "M")],
+    "health & medicine": [_thema("Medicine and nursing", "M")],
+    "nursing": [_thema("Nursing", "MQC")],
+    "economics": [_thema("Economics", "KC")],
+    "business & management": [_thema("Business and management", "KJ")],
+    "business and management": [_thema("Business and management", "KJ")],
+    "human resources": [_thema("Human resource management", "KJMB")],
+    "globalization": [_thema("Globalization", "JPS")],
+    "ethics": [_thema("Ethics and moral philosophy", "QDPM")],
+    "music": [_thema("Music", "AV")],
+    "art": [_thema("The arts", "A")],
+    "drawing": [_thema("Drawing and drawings", "AFC")],
+    "agriculture": [_thema("Agriculture and farming", "TV")],
+    "open access": [_thema("Library and information studies / archivistics", "GL")],
+}
+
+THEMA_CATEGORY_MAP: dict[str, list[dict[str, str]]] = {
+    "arts & humanities": [_thema("The arts", "A")],
+    "social sciences": [_thema("Society and Social Sciences", "J")],
+    "business & management": [_thema("Economics, finance, business and management", "K")],
+    "law & policy": [_thema("Law", "L")],
+    "health & medicine": [_thema("Medicine and nursing", "M")],
+    "earth & environment": [_thema("Earth sciences, geography, environment, planning", "R")],
+    "stem": [_thema("Mathematics and Science", "P"), _thema("Technology, engineering, agriculture", "T")],
+    "language & communication": [_thema("Language, linguistics and communication", "C")],
+    "information & research": [_thema("Library and information studies / archivistics", "GL")],
+    "education": [_thema("Education", "JN")],
+}
+
+
 def _lcc(term: str, code: str) -> dict[str, str]:
     return {"scheme": "http://id.loc.gov", "term": term, "code": code}
 
 
 def _lcsh(term: str) -> dict[str, str]:
     return {"scheme": "http://id.loc.gov/authorities/subjects", "term": term}
-
-
-def _thema(term: str, code: str) -> dict[str, str]:
-    return {"scheme": THEMA_SCHEME_URI, "term": term, "code": code}
 
 
 def _iter_thema_codes(node: Any) -> list[tuple[str, str]]:
@@ -58,9 +120,13 @@ def _iter_thema_codes(node: Any) -> list[tuple[str, str]]:
 @lru_cache(maxsize=1)
 def _thema_lookup() -> dict[str, list[dict[str, str]]]:
     lookup: dict[str, list[dict[str, str]]] = {}
-    for language_code, url in THEMA_REFERENCE_URLS.items():
+    for url in THEMA_REFERENCE_URLS.values():
         try:
-            response = requests.get(url, timeout=20)
+            response = requests.get(
+                url,
+                timeout=20,
+                headers={"Accept": "application/json", "User-Agent": "oapen-opds-feed-generator/1.0"},
+            )
             response.raise_for_status()
             payload = response.json()
         except Exception:
@@ -290,37 +356,39 @@ def resolve_lcsh(subject_name: str) -> list[dict[str, str]]:
 
 def resolve_thema(subject_name: str) -> list[dict[str, str]]:
     lookup = _thema_lookup()
-    if not lookup:
-        return []
+    mappings: list[dict[str, str]] = []
+    dedupe_codes: set[str] = set()
 
-    keys: list[str] = []
+    def _append(entries: list[dict[str, str]]) -> None:
+        for entry in entries:
+            code = entry.get("code", "")
+            if not code or code in dedupe_codes:
+                continue
+            dedupe_codes.add(code)
+            mappings.append(dict(entry))
+
     subject_key = _canonical_key(subject_name)
     if subject_key:
-        keys.append(subject_key)
+        _append(THEMA_STARTER_MAP.get(subject_key, []))
 
     category = classify_subject_category(subject_name)
+    category_key = ""
     if category:
         category_key = _canonical_key(category)
         if category_key:
-            keys.append(category_key)
+            _append(THEMA_CATEGORY_MAP.get(category_key, []))
 
     # Reuse LCSH terms as lexical hints into THEMA labels.
     for mapping in resolve_lcsh(subject_name):
         term = mapping.get("term", "")
         key = _canonical_key(term)
         if key:
-            keys.append(key)
+            _append(THEMA_STARTER_MAP.get(key, []))
 
-    if not keys:
-        return []
+    # Optional enrichment from remote THEMA label corpora.
+    for key in (subject_key, category_key):
+        if not key:
+            continue
+        _append(lookup.get(key, []))
 
-    dedupe_codes: set[str] = set()
-    resolved: list[dict[str, str]] = []
-    for key in keys:
-        for entry in lookup.get(key, []):
-            code = entry.get("code", "")
-            if not code or code in dedupe_codes:
-                continue
-            dedupe_codes.add(code)
-            resolved.append(dict(entry))
-    return resolved
+    return mappings
