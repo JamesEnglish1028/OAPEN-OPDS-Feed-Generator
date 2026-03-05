@@ -1981,7 +1981,7 @@ def admin_ui() -> str:
             </div>
             <label class="check"><input id="repo-active" type="checkbox" checked> Active repository</label>
             <div class="actions">
-              <button type="submit">Save Repository</button>
+              <button type="submit" id="save-repo">Save Repository</button>
               <button type="button" class="ghost" id="refresh-repos">Refresh List</button>
             </div>
           </form>
@@ -2091,6 +2091,10 @@ def admin_ui() -> str:
     const repoDetail = document.getElementById("repo-detail");
     const repoDetailEmpty = document.getElementById("repo-detail-empty");
     const repoDetailActions = document.getElementById("repo-detail-actions");
+    const saveRepoButton = document.getElementById("save-repo");
+    const repoIdInput = document.getElementById("repo-id");
+    const repoNameInput = document.getElementById("repo-name");
+    const repoConfigInput = document.getElementById("repo-config");
     const directoryList = document.getElementById("directory-list");
     const directorySelectAll = document.getElementById("directory-select-all");
     const startHarvestButton = document.getElementById("start-harvest");
@@ -2151,6 +2155,22 @@ def admin_ui() -> str:
       } catch (error) {
         throw new Error("Config JSON is invalid: " + error.message);
       }
+    }
+
+    function isConfigJsonValid() {
+      try {
+        normalizeConfigText(repoConfigInput.value);
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+
+    function updateRepoFormButtonState() {
+      const hasId = Boolean(repoIdInput.value.trim());
+      const hasName = Boolean(repoNameInput.value.trim());
+      const hasValidConfig = isConfigJsonValid();
+      saveRepoButton.disabled = !(hasId && hasName && hasValidConfig) || harvestBusy;
     }
 
     function getCheckedDirectoryEntries() {
@@ -2227,6 +2247,7 @@ def admin_ui() -> str:
           return;
         }
         harvestActionHint.textContent = "Enter a feed URL to begin.";
+        updateRepoFormButtonState();
         return;
       }
 
@@ -2236,9 +2257,11 @@ def admin_ui() -> str:
         importIntoRepositoryButton.disabled = true;
         if (harvestBusy) {
           harvestActionHint.textContent = "Harvest is running...";
+          updateRepoFormButtonState();
           return;
         }
         harvestActionHint.textContent = "Select a repository to run ingest actions.";
+        updateRepoFormButtonState();
         return;
       }
 
@@ -2248,6 +2271,7 @@ def admin_ui() -> str:
         importIntoRepositoryButton.disabled = harvestBusy || !(mode === "single-repository-collections");
         if (harvestBusy) {
           harvestActionHint.textContent = "Harvest is running...";
+          updateRepoFormButtonState();
           return;
         }
         if (mode === "split-repositories") {
@@ -2255,6 +2279,7 @@ def admin_ui() -> str:
         } else {
           harvestActionHint.textContent = "Directories selected: use 'Import Into Selected Repository' to ingest as collections.";
         }
+        updateRepoFormButtonState();
         return;
       }
 
@@ -2263,9 +2288,11 @@ def admin_ui() -> str:
       importIntoRepositoryButton.disabled = true;
       if (harvestBusy) {
         harvestActionHint.textContent = "Harvest is running...";
+        updateRepoFormButtonState();
         return;
       }
       harvestActionHint.textContent = "No directories selected: use 'Start Harvest' for direct single-feed ingest, or fetch/select directories first.";
+      updateRepoFormButtonState();
     }
 
     function syncDirectoryImportModeUi() {
@@ -2554,6 +2581,7 @@ def admin_ui() -> str:
       document.getElementById("repo-type").value = repo.source_type;
       document.getElementById("repo-config").value = JSON.stringify(repo.config || {}, null, 2);
       document.getElementById("repo-active").checked = Boolean(repo.is_active);
+      updateRepoFormButtonState();
     }
 
     function selectRepository(repo) {
@@ -2625,6 +2653,7 @@ def admin_ui() -> str:
         document.getElementById("repo-form").reset();
         document.getElementById("repo-config").value = "{}";
         document.getElementById("repo-active").checked = true;
+        updateRepoFormButtonState();
         await refreshRepositoriesSilently();
       }
     }
@@ -2736,6 +2765,15 @@ def admin_ui() -> str:
     document.getElementById("repo-form").addEventListener("submit", (event) => {
       saveRepository(event).catch((error) => show({ error: String(error) }));
     });
+    repoIdInput.addEventListener("input", () => {
+      updateRepoFormButtonState();
+    });
+    repoNameInput.addEventListener("input", () => {
+      updateRepoFormButtonState();
+    });
+    repoConfigInput.addEventListener("input", () => {
+      updateRepoFormButtonState();
+    });
     document.getElementById("harvest-form").addEventListener("submit", (event) => {
       runHarvest(event).catch((error) => show({ error: String(error) }));
     });
@@ -2783,6 +2821,7 @@ def admin_ui() -> str:
     renderDirectoryEntries([]);
     syncDirectoryImportModeUi();
     updateHarvestActionState();
+    updateRepoFormButtonState();
   </script>
 </body>
 </html>"""
