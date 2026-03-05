@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from functools import lru_cache
+from typing import Any
+
+import requests
+
 from app.subject_aliases import subject_lookup_key
 from app.subject_categories import classify_subject_category
 
 
+THEMA_SCHEME_URI = "https://ns.editeur.org/thema/"
 THEMA_REFERENCE_URLS: dict[str, str] = {
     "en": "https://www.editeur.org/files/Thema/1.6/v1.6_en/20250410_Thema_v1.6_en.json",
     "de": "https://www.editeur.org/files/Thema/1.6/v1.6_de/20251215_Thema_v1.6_de.json",
@@ -20,6 +26,57 @@ def _lcc(term: str, code: str) -> dict[str, str]:
 
 def _lcsh(term: str) -> dict[str, str]:
     return {"scheme": "http://id.loc.gov/authorities/subjects", "term": term}
+
+
+def _thema(term: str, code: str) -> dict[str, str]:
+    return {"scheme": THEMA_SCHEME_URI, "term": term, "code": code}
+
+
+def _iter_thema_codes(node: Any) -> list[tuple[str, str]]:
+    matches: list[tuple[str, str]] = []
+
+    def _walk(value: Any) -> None:
+        if isinstance(value, dict):
+            raw_code = value.get("CodeValue")
+            raw_desc = value.get("CodeDescription")
+            if isinstance(raw_code, str) and isinstance(raw_desc, str):
+                code = raw_code.strip()
+                description = raw_desc.strip()
+                if code and description:
+                    matches.append((code, description))
+            for item in value.values():
+                _walk(item)
+            return
+        if isinstance(value, list):
+            for item in value:
+                _walk(item)
+
+    _walk(node)
+    return matches
+
+
+@lru_cache(maxsize=1)
+def _thema_lookup() -> dict[str, list[dict[str, str]]]:
+    lookup: dict[str, list[dict[str, str]]] = {}
+    for language_code, url in THEMA_REFERENCE_URLS.items():
+        try:
+            response = requests.get(url, timeout=20)
+            response.raise_for_status()
+            payload = response.json()
+        except Exception:
+            continue
+
+        seen_in_language: set[tuple[str, str]] = set()
+        for code, description in _iter_thema_codes(payload):
+            key = subject_lookup_key(description)
+            if not key:
+                continue
+            dedupe_key = (key, code)
+            if dedupe_key in seen_in_language:
+                continue
+            seen_in_language.add(dedupe_key)
+            lookup.setdefault(key, []).append(_thema(description, code))
+    return lookup
 
 
 # LCC navigation-oriented mappings (hierarchical class focus).
@@ -229,3 +286,41 @@ def resolve_lcsh(subject_name: str) -> list[dict[str, str]]:
     category_key = _canonical_key(category)
     mapped = LCSH_SUBJECT_MAP.get(category_key, [])
     return [dict(item) for item in mapped]
+
+
+def resolve_thema(subject_name: str) -> list[dict[str, str]]:
+    lookup = _thema_lookup()
+    if not lookup:
+        return []
+
+    keys: list[str] = []
+    subject_key = _canonical_key(subject_name)
+    if subject_key:
+        keys.append(subject_key)
+
+    category = classify_subject_category(subject_name)
+    if category:
+        category_key = _canonical_key(category)
+        if category_key:
+            keys.append(category_key)
+
+    # Reuse LCSH terms as lexical hints into THEMA labels.
+    for mapping in resolve_lcsh(subject_name):
+        term = mapping.get("term", "")
+        key = _canonical_key(term)
+        if key:
+            keys.append(key)
+
+    if not keys:
+        return []
+
+    dedupe_codes: set[str] = set()
+    resolved: list[dict[str, str]] = []
+    for key in keys:
+        for entry in lookup.get(key, []):
+            code = entry.get("code", "")
+            if not code or code in dedupe_codes:
+                continue
+            dedupe_codes.add(code)
+            resolved.append(dict(entry))
+    return resolved

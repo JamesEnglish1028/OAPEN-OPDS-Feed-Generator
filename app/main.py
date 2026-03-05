@@ -17,7 +17,7 @@ from app.harvest import run_incremental_for_all_checkpoints
 from app.scheduler import IncrementalHarvestScheduler
 from app.sources import extract_json_records, iter_json_records, iter_json_records_from_url, load_json_payload_from_url, load_oai_dc_records
 from app.store import IngestResult, PublicationStore, RepositoryConfig
-from app.subject_authorities import resolve_lcc, resolve_lcsh
+from app.subject_authorities import resolve_lcc, resolve_lcsh, resolve_thema
 from app.transform import (
     first_valid_publisher,
     native_name_for_language,
@@ -3928,7 +3928,7 @@ def classification_raw_stats(
 @app.get("/repositories/{repository_id}/classifications/authority-stats")
 def classification_authority_stats(
     repository_id: str,
-    scheme: str = Query(default="lcc", pattern="^(?i)(lcc|lcsh)$"),
+    scheme: str = Query(default="lcc", pattern="^(?i)(lcc|lcsh|thema)$"),
     min_count: int = Query(default=1, ge=1),
     top_limit: int = Query(default=50, ge=1, le=500),
 ) -> dict:
@@ -3953,12 +3953,14 @@ def classification_authority_resolve(
     _get_repository_or_404(repository_id)
     lcc = resolve_lcc(subject)
     lcsh = resolve_lcsh(subject)
+    thema = resolve_thema(subject)
     return {
         "repository_id": repository_id,
         "subject": subject,
         "lcc": lcc,
         "lcsh": lcsh,
-        "has_mapping": bool(lcc or lcsh),
+        "thema": thema,
+        "has_mapping": bool(lcc or lcsh or thema),
     }
 
 

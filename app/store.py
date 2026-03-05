@@ -13,7 +13,7 @@ from sqlalchemy.sql import func
 
 from app.models import NormalizedPublication
 from app.subject_aliases import canonicalize_subject_term
-from app.subject_authorities import resolve_lcc, resolve_lcsh
+from app.subject_authorities import resolve_lcc, resolve_lcsh, resolve_thema
 from app.subject_categories import classify_subject_category
 
 
@@ -1194,8 +1194,8 @@ class PublicationStore:
     ) -> dict[str, Any]:
         effective_min_count = max(min_count, 1)
         scheme_key = scheme.strip().casefold()
-        if scheme_key not in {"lcc", "lcsh"}:
-            raise ValueError("scheme must be one of: lcc, lcsh")
+        if scheme_key not in {"lcc", "lcsh", "thema"}:
+            raise ValueError("scheme must be one of: lcc, lcsh, thema")
 
         with self._session() as session:
             count_expr = sqla_func.count(sqla_func.distinct(PublicationSubjectRow.publication_id))
@@ -1226,7 +1226,12 @@ class PublicationStore:
             total_subject_buckets += 1
             total_assignment_count += bucket_count
 
-            mappings = resolve_lcc(name) if scheme_key == "lcc" else resolve_lcsh(name)
+            if scheme_key == "lcc":
+                mappings = resolve_lcc(name)
+            elif scheme_key == "lcsh":
+                mappings = resolve_lcsh(name)
+            else:
+                mappings = resolve_thema(name)
             has_mapping = bool(mappings)
             if has_mapping:
                 mapped_subject_buckets += 1
