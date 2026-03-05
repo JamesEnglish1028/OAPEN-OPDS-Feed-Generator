@@ -2790,8 +2790,8 @@ def _opds_feed_for_repository(
                 "navigation": collection_group_links,
             },
         ]
-        response = _attach_language_facets(request=request, response=response, language_counts=languages, repository_id=repository_id)
-        return _attach_browse_facets(request=request, response=response, repository_id=repository_id)
+        response.pop("facets", None)
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=repository_id)
 
