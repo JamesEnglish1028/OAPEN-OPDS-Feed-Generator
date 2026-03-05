@@ -17,6 +17,7 @@ from app.harvest import run_incremental_for_all_checkpoints
 from app.scheduler import IncrementalHarvestScheduler
 from app.sources import extract_json_records, iter_json_records, iter_json_records_from_url, load_json_payload_from_url, load_oai_dc_records
 from app.store import IngestResult, PublicationStore, RepositoryConfig
+from app.subject_authorities import resolve_lcc, resolve_lcsh
 from app.transform import (
     first_valid_publisher,
     native_name_for_language,
@@ -3921,6 +3922,43 @@ def classification_raw_stats(
         "distinct_canonical_subjects": stats["distinct_canonical_subjects"],
         "top_raw_subjects": stats["top_raw_subjects"],
         "top_canonical_subjects": stats["top_canonical_subjects"],
+    }
+
+
+@app.get("/repositories/{repository_id}/classifications/authority-stats")
+def classification_authority_stats(
+    repository_id: str,
+    scheme: str = Query(default="lcc", pattern="^(?i)(lcc|lcsh)$"),
+    min_count: int = Query(default=1, ge=1),
+    top_limit: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    _get_repository_or_404(repository_id)
+    try:
+        stats = store.subject_authority_statistics(
+            repository_id=repository_id,
+            scheme=scheme,
+            min_count=min_count,
+            top_limit=top_limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"repository_id": repository_id, **stats}
+
+
+@app.get("/repositories/{repository_id}/classifications/authority-resolve")
+def classification_authority_resolve(
+    repository_id: str,
+    subject: str = Query(..., min_length=1),
+) -> dict:
+    _get_repository_or_404(repository_id)
+    lcc = resolve_lcc(subject)
+    lcsh = resolve_lcsh(subject)
+    return {
+        "repository_id": repository_id,
+        "subject": subject,
+        "lcc": lcc,
+        "lcsh": lcsh,
+        "has_mapping": bool(lcc or lcsh),
     }
 
 

@@ -13,6 +13,7 @@ from sqlalchemy.sql import func
 
 from app.models import NormalizedPublication
 from app.subject_aliases import canonicalize_subject_term
+from app.subject_authorities import resolve_lcc, resolve_lcsh
 from app.subject_categories import classify_subject_category
 
 
@@ -1181,6 +1182,84 @@ class PublicationStore:
             "minimum_count": effective_min_count,
             "top_raw_subjects": top_raw_subjects,
             "top_canonical_subjects": top_canonical_subjects,
+        }
+
+    def subject_authority_statistics(
+        self,
+        repository_id: str = "default",
+        *,
+        scheme: str = "lcc",
+        min_count: int = 1,
+        top_limit: int = 50,
+    ) -> dict[str, Any]:
+        effective_min_count = max(min_count, 1)
+        scheme_key = scheme.strip().casefold()
+        if scheme_key not in {"lcc", "lcsh"}:
+            raise ValueError("scheme must be one of: lcc, lcsh")
+
+        with self._session() as session:
+            count_expr = sqla_func.count(sqla_func.distinct(PublicationSubjectRow.publication_id))
+            statement = (
+                select(
+                    PublicationSubjectRow.subject_slug,
+                    PublicationSubjectRow.subject_name,
+                    count_expr,
+                )
+                .where(PublicationSubjectRow.repository_id == repository_id)
+                .group_by(PublicationSubjectRow.subject_slug, PublicationSubjectRow.subject_name)
+                .having(count_expr >= effective_min_count)
+                .order_by(count_expr.desc(), PublicationSubjectRow.subject_name.asc())
+            )
+            rows = session.execute(statement).all()
+
+        total_subject_buckets = 0
+        mapped_subject_buckets = 0
+        total_assignment_count = 0
+        mapped_assignment_count = 0
+        top_mapped: list[dict[str, Any]] = []
+        top_unmapped: list[dict[str, Any]] = []
+
+        for slug, name, count in rows:
+            if not isinstance(slug, str) or not slug or not isinstance(name, str) or not name:
+                continue
+            bucket_count = int(count)
+            total_subject_buckets += 1
+            total_assignment_count += bucket_count
+
+            mappings = resolve_lcc(name) if scheme_key == "lcc" else resolve_lcsh(name)
+            has_mapping = bool(mappings)
+            if has_mapping:
+                mapped_subject_buckets += 1
+                mapped_assignment_count += bucket_count
+
+            entry = {"slug": slug, "name": name, "count": bucket_count}
+            if has_mapping:
+                entry["mappings"] = mappings if isinstance(mappings, list) else [mappings]
+                if len(top_mapped) < top_limit:
+                    top_mapped.append(entry)
+            else:
+                if len(top_unmapped) < top_limit:
+                    top_unmapped.append(entry)
+
+        coverage_by_subjects = (
+            (mapped_subject_buckets / total_subject_buckets) if total_subject_buckets else 0.0
+        )
+        coverage_by_assignments = (
+            (mapped_assignment_count / total_assignment_count) if total_assignment_count else 0.0
+        )
+
+        return {
+            "scheme": scheme_key.upper(),
+            "minimum_count": effective_min_count,
+            "total_subject_buckets": total_subject_buckets,
+            "mapped_subject_buckets": mapped_subject_buckets,
+            "unmapped_subject_buckets": max(total_subject_buckets - mapped_subject_buckets, 0),
+            "total_assignment_count": total_assignment_count,
+            "mapped_assignment_count": mapped_assignment_count,
+            "coverage_by_subject_buckets": round(coverage_by_subjects, 6),
+            "coverage_by_assignments": round(coverage_by_assignments, 6),
+            "top_mapped": top_mapped,
+            "top_unmapped": top_unmapped,
         }
 
     def page_by_subject_slug(

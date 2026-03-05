@@ -188,6 +188,19 @@ Sub-classifications index for a classification:
 curl "http://127.0.0.1:8000/opds/classifications/education/subjects?page=1&page_size=100"
 ```
 
+Authority mapping coverage (LCC or LCSH):
+
+```bash
+curl "http://127.0.0.1:8000/repositories/default/classifications/authority-stats?scheme=lcc&min_count=3&top_limit=25"
+curl "http://127.0.0.1:8000/repositories/default/classifications/authority-stats?scheme=lcsh&min_count=3&top_limit=25"
+```
+
+Resolve one subject term against authority mappings:
+
+```bash
+curl "http://127.0.0.1:8000/repositories/default/classifications/authority-resolve?subject=Higher%20Education"
+```
+
 Publication year feed:
 
 ```bash
