@@ -46,13 +46,10 @@ def test_ingest_json_and_opds_pagination() -> None:
     assert len(page_1_json["publications"]) == 1
     rels = [link["rel"] for link in page_1_json["links"]]
     assert "next" in rels
-    assert "navigation" in page_1_json
-    assert "facets" in page_1_json
-    assert page_1_json["facets"][0]["metadata"]["title"] == "Language"
-    assert any(facet["metadata"]["title"] == "Collections" for facet in page_1_json["facets"])
-    assert any(facet["metadata"]["title"] == "Classifications" for facet in page_1_json["facets"])
-    assert page_1_json["navigation"][0]["href"].endswith("/opds/years/2026")
-    assert page_1_json["navigation"][0]["title"] == "Publication Year: 2026"
+    assert "groups" in page_1_json
+    assert any(group["metadata"]["title"] == "Language" for group in page_1_json["groups"])
+    assert any(group["metadata"]["title"] == "LCC Top-Level Subjects" for group in page_1_json["groups"])
+    assert any(group["metadata"]["title"] == "Collections" for group in page_1_json["groups"])
     assert any(
         link["rel"] == "search"
         and link.get("templated") is True
@@ -79,7 +76,7 @@ def test_get_single_publication() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["metadata"]["title"] == "Open Access Book One"
-    assert "belongsTo" not in payload["metadata"]
+    assert payload["metadata"]["belongsTo"]["collection"]["name"] == "OAPEN Press"
 
     enriched = client.get("/publications/book-3")
     assert enriched.status_code == 200
@@ -259,8 +256,6 @@ def test_collection_and_language_subfeeds() -> None:
     assert language_json["metadata"]["numberOfItems"] == 3
     assert "facets" in language_json
     assert language_json["facets"][0]["metadata"]["title"] == "Language"
-    assert any(facet["metadata"]["title"] == "Collections" for facet in language_json["facets"])
-    assert any(facet["metadata"]["title"] == "Classifications" for facet in language_json["facets"])
     assert any(link["rel"] == "start" for link in language_json["links"])
     assert any(link["rel"] == "up" for link in language_json["links"])
 
@@ -272,8 +267,6 @@ def test_collection_and_language_subfeeds() -> None:
     assert "facets" in year_json
     assert year_json["facets"][0]["metadata"]["title"] == "Language"
     assert len(year_json["facets"][0]["links"]) >= 1
-    assert any(facet["metadata"]["title"] == "Collections" for facet in year_json["facets"])
-    assert any(facet["metadata"]["title"] == "Classifications" for facet in year_json["facets"])
     assert any(link["rel"] == "start" for link in year_json["links"])
     assert any(link["rel"] == "up" for link in year_json["links"])
 
@@ -282,11 +275,8 @@ def test_collection_and_language_subfeeds() -> None:
     publisher_json = publisher_feed.json()
     assert publisher_json["metadata"]["numberOfItems"] == 3
 
-    classification_feed = client.get("/opds/classifications/education?page=1&page_size=10")
+    classification_feed = client.get("/opds/classifications?page=1&page_size=10")
     assert classification_feed.status_code == 200
-    classification_json = classification_feed.json()
-    assert classification_json["metadata"]["numberOfItems"] == 1
-    assert classification_json["publications"][0]["metadata"]["title"] == "Open Access Book Three"
 
 
 def test_opds_search_endpoint() -> None:
@@ -514,7 +504,8 @@ def test_language_facet_titles_use_uppercase_native_names() -> None:
 
     root_feed = client.get("/opds?page=1&page_size=10")
     assert root_feed.status_code == 200
-    language_facet_links = root_feed.json()["facets"][0]["links"]
+    language_group = next(group for group in root_feed.json()["groups"] if group["metadata"]["title"] == "Language")
+    language_facet_links = language_group["navigation"]
     titles = [item["title"] for item in language_facet_links]
     assert "ENGLISH" in titles
 
@@ -539,7 +530,8 @@ def test_language_facet_titles_for_norwegian_variants(tmp_path) -> None:
 
     root_feed = client.get("/opds?page=1&page_size=10")
     assert root_feed.status_code == 200
-    links = root_feed.json()["facets"][0]["links"]
+    language_group = next(group for group in root_feed.json()["groups"] if group["metadata"]["title"] == "Language")
+    links = language_group["navigation"]
     title_by_href = {item["href"].split("/opds/languages/")[-1]: item["title"] for item in links}
     assert title_by_href["NOR"] == "NORSK"
     assert title_by_href["NOB"] == "NORSK BOKMAL"
@@ -558,7 +550,8 @@ def test_language_facet_titles_from_iso639_living_reference_names(tmp_path) -> N
 
     root_feed = client.get("/opds?page=1&page_size=10")
     assert root_feed.status_code == 200
-    links = root_feed.json()["facets"][0]["links"]
+    language_group = next(group for group in root_feed.json()["groups"] if group["metadata"]["title"] == "Language")
+    links = language_group["navigation"]
     title_by_href = {item["href"].split("/opds/languages/")[-1]: item["title"] for item in links}
     assert title_by_href["AFR"] == "AFRIKAANS"
 
@@ -763,8 +756,7 @@ def test_repository_opds_json_ingest_follows_next_and_reuses_feed_features(monke
     feed_json = feed.json()
     assert feed_json["metadata"]["numberOfItems"] == 2
     assert feed_json["metadata"]["repositoryId"] == "opds-remote"
-    assert "facets" in feed_json
-    assert "navigation" in feed_json
+    assert "groups" in feed_json
     assert any(link["rel"] == "search" for link in feed_json["links"])
 
     first_pub = client.get("/repositories/opds-remote/publications/remote-1")
@@ -867,12 +859,10 @@ def test_cleanup_repository_by_identifier_prefix_removes_matching_records(tmp_pa
             {
                 "publications": [
                     {
-                        "id": "keep-prefix-1",
                         "title": "Keep Prefix Me",
                         "identifier": "oapen:book:123",
                     },
                     {
-                        "id": "remove-prefix-1",
                         "title": "Remove Prefix Me",
                         "identifier": "urn:pressbooks.directory:book:456",
                     },

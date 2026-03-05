@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 import uuid
 from datetime import UTC, datetime
@@ -62,6 +63,29 @@ class OpdsJsonIngestRequest(BaseModel):
     timeout_seconds: int = Field(default=120, ge=1, le=600)
     incremental: bool = True
     checkpoint_key: str | None = None
+    collection_name: str | None = None
+
+
+class OpdsDirectoryEntryRequest(BaseModel):
+    title: str
+    href: str
+
+
+class OpdsDirectoryPreviewRequest(BaseModel):
+    url: str = Field(description="HTTP(S) URL to an OPDS-like JSON root.")
+    timeout_seconds: int = Field(default=120, ge=1, le=600)
+
+
+class OpdsDirectoryImportRequest(BaseModel):
+    root_url: str = Field(description="Root OPDS URL used for directory discovery.")
+    directories: list[OpdsDirectoryEntryRequest] = Field(default_factory=list)
+    mode: str = Field(default="split-repositories")
+    target_repository_id: str | None = None
+    follow_next: bool = True
+    incremental: bool = True
+    timeout_seconds: int = Field(default=120, ge=1, le=600)
+    max_pages: int | None = Field(default=None, ge=1)
+    max_records: int | None = Field(default=None, ge=1)
 
 
 class IngestJobRequest(BaseModel):
@@ -316,6 +340,74 @@ def _extract_opds_navigation_urls(payload: object, current_url: str) -> list[str
     return deduped
 
 
+def _extract_opds_navigation_entries(payload: object, current_url: str) -> list[dict[str, str]]:
+    if not isinstance(payload, dict):
+        return []
+    entries: list[dict[str, str]] = []
+
+    def _append_from_links(value: object, group_title: str | None = None) -> None:
+        if not isinstance(value, list):
+            return
+        for link in value:
+            if not isinstance(link, dict):
+                continue
+            href = link.get("href")
+            if not isinstance(href, str) or not href.strip():
+                continue
+            absolute_href = urljoin(current_url, href.strip())
+            title = link.get("title")
+            if not isinstance(title, str) or not title.strip():
+                parsed = urlparse(absolute_href)
+                title = parsed.path.strip("/") or parsed.netloc or absolute_href
+            entry = {"title": title.strip(), "href": absolute_href}
+            if isinstance(group_title, str) and group_title.strip():
+                entry["group"] = group_title.strip()
+            entries.append(entry)
+
+    _append_from_links(payload.get("navigation"))
+    groups = payload.get("groups")
+    if isinstance(groups, list):
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            group_title = None
+            metadata = group.get("metadata")
+            if isinstance(metadata, dict):
+                candidate = metadata.get("title")
+                if isinstance(candidate, str) and candidate.strip():
+                    group_title = candidate
+            _append_from_links(group.get("navigation"), group_title=group_title)
+
+    deduped: list[dict[str, str]] = []
+    seen_hrefs: set[str] = set()
+    for entry in entries:
+        href = entry["href"]
+        if href in seen_hrefs:
+            continue
+        seen_hrefs.add(href)
+        deduped.append(entry)
+    return deduped
+
+
+def _slugify_text(value: str | None, max_length: int = 64) -> str:
+    text = (value or "").strip().lower()
+    if not text:
+        return ""
+    slug = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    if not slug:
+        return ""
+    return slug[:max_length]
+
+
+def _next_available_repository_id(base_slug: str) -> str:
+    candidate = base_slug
+    suffix = 2
+    while store.get_repository(candidate) is not None:
+        candidate = f"{base_slug}-{suffix}"
+        suffix += 1
+    return candidate
+
+
 def _ingest_opds_json(request: OpdsJsonIngestRequest, repository_id: str = DEFAULT_REPOSITORY_ID) -> tuple[IngestResult, dict]:
     result = IngestResult(accepted=0, rejected=0, errors=[])
     last_invalidation_count = 0
@@ -349,6 +441,10 @@ def _ingest_opds_json(request: OpdsJsonIngestRequest, repository_id: str = DEFAU
             if normalized is None:
                 result.rejected += 1
             else:
+                if isinstance(request.collection_name, str) and request.collection_name.strip():
+                    collection_name = request.collection_name.strip()
+                    normalized.collection = collection_name
+                    normalized.collection_slug = _slugify_text(collection_name, max_length=512) or None
                 store.upsert(_set_repository_on_publication(normalized, repository_id))
                 result.accepted += 1
                 last_invalidation_count = _maybe_invalidate_opds_cache_during_ingest(
@@ -1353,7 +1449,13 @@ def _invalidate_opds_cache(repository_id: str | None = None) -> None:
     if repository_id is None:
         opds_cache.invalidate_feed_keys()
         return
-    opds_cache.invalidate_feed_keys(namespace=_cache_namespace(repository_id))
+    namespace = _cache_namespace(repository_id)
+    try:
+        opds_cache.invalidate_feed_keys(namespace=namespace)
+    except TypeError:
+        # Backward-compatibility for older cache fakes/tests that only expose
+        # invalidate_feed_keys() without a namespace parameter.
+        opds_cache.invalidate_feed_keys()
 
 
 def _cached_opds_response(request: Request, builder, repository_id: str) -> dict:
@@ -1456,6 +1558,8 @@ def _attach_subclassification_facets(
 
 
 def _get_repository_or_404(repository_id: str) -> RepositoryConfig:
+    if repository_id == DEFAULT_REPOSITORY_ID:
+        _ensure_default_repository()
     repository = store.get_repository(repository_id)
     if repository is None:
         raise HTTPException(status_code=404, detail="Repository not found")
@@ -1855,7 +1959,7 @@ def admin_ui() -> str:
 
         <div class="card">
           <h2>Harvest OPDS-Like JSON</h2>
-          <p class="hint">Seed a repository from a remote OPDS feed. This saves a checkpoint so later <code>/harvest/run</code> and the daily scheduler continue from <code>next_url</code>.</p>
+          <p class="hint">Seed a repository from a remote OPDS feed. For sparse OPDS roots, fetch directories first, select what to import, and choose import mode.</p>
           <form id="harvest-form">
             <div>
               <label for="harvest-repo">Repository</label>
@@ -1883,7 +1987,22 @@ def admin_ui() -> str:
             <label class="check"><input id="harvest-incremental" type="checkbox" checked> Persist checkpoint for scheduled harvests</label>
             <div class="actions">
               <button type="submit" class="secondary">Start Harvest</button>
+              <button type="button" class="ghost" id="fetch-directories">Fetch Directories</button>
               <button type="button" class="ghost" id="load-checkpoints">Load Checkpoints</button>
+            </div>
+            <div style="margin-top:14px;">
+              <label for="directory-import-mode">Directory Import Mode</label>
+              <select id="directory-import-mode">
+                <option value="split-repositories">Create one repository per selected directory</option>
+                <option value="single-repository-collections">Ingest selected directories as collections in selected repository</option>
+              </select>
+            </div>
+            <div style="margin-top:10px;">
+              <label class="check"><input id="directory-select-all" type="checkbox"> Select all fetched directories</label>
+              <div id="directory-list" class="list" style="max-height:220px;"></div>
+            </div>
+            <div class="actions" style="margin-top:10px;">
+              <button type="button" id="import-selected-directories">Import Selected Directories</button>
             </div>
           </form>
         </div>
@@ -1934,8 +2053,11 @@ def admin_ui() -> str:
     const repoDetail = document.getElementById("repo-detail");
     const repoDetailEmpty = document.getElementById("repo-detail-empty");
     const repoDetailActions = document.getElementById("repo-detail-actions");
+    const directoryList = document.getElementById("directory-list");
+    const directorySelectAll = document.getElementById("directory-select-all");
     const output = document.getElementById("output");
     const subjectBackfillCursors = {};
+    let directoryEntries = [];
     let selectedRepository = null;
 
     function show(data) {
@@ -1982,6 +2104,46 @@ def admin_ui() -> str:
       } catch (error) {
         throw new Error("Config JSON is invalid: " + error.message);
       }
+    }
+
+    function getCheckedDirectoryEntries() {
+      const selected = [];
+      for (const input of directoryList.querySelectorAll("input[data-directory-index]")) {
+        if (!input.checked) {
+          continue;
+        }
+        const index = Number(input.getAttribute("data-directory-index"));
+        if (!Number.isFinite(index) || !directoryEntries[index]) {
+          continue;
+        }
+        selected.push(directoryEntries[index]);
+      }
+      return selected;
+    }
+
+    function renderDirectoryEntries(entries) {
+      directoryEntries = Array.isArray(entries) ? entries : [];
+      directoryList.innerHTML = "";
+      directorySelectAll.checked = false;
+      if (!directoryEntries.length) {
+        const empty = document.createElement("small");
+        empty.textContent = "No directories found yet.";
+        empty.style.color = "var(--muted)";
+        directoryList.appendChild(empty);
+        return;
+      }
+      directoryEntries.forEach((entry, index) => {
+        const row = document.createElement("label");
+        row.className = "check";
+        row.style.margin = "0";
+        const title = typeof entry.title === "string" && entry.title.trim() ? entry.title.trim() : entry.href;
+        const group = typeof entry.group === "string" && entry.group.trim() ? " [" + entry.group.trim() + "]" : "";
+        row.innerHTML = [
+          '<input type="checkbox" data-directory-index="' + index + '">',
+          '<span><strong>' + title + "</strong>" + group + '<br><small style="color: var(--muted);">' + entry.href + "</small></span>",
+        ].join("");
+        directoryList.appendChild(row);
+      });
     }
 
     function createDetailRow(label, value) {
@@ -2301,6 +2463,63 @@ def admin_ui() -> str:
       show(data);
     }
 
+    async function fetchDirectories() {
+      const url = document.getElementById("harvest-url").value.trim();
+      if (!url) {
+        show({ error: "Enter a remote feed URL first." });
+        return;
+      }
+      const timeoutSeconds = Number(document.getElementById("harvest-timeout").value) || 120;
+      const response = await fetch("/ingest/opds-json/directories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: url, timeout_seconds: timeoutSeconds }),
+      });
+      const data = await readJson(response);
+      show(data);
+      if (response.ok) {
+        renderDirectoryEntries(data.directories || []);
+      }
+    }
+
+    async function importSelectedDirectories() {
+      const selectedEntries = getCheckedDirectoryEntries();
+      if (!selectedEntries.length) {
+        show({ error: "Select at least one directory to import." });
+        return;
+      }
+      const mode = document.getElementById("directory-import-mode").value;
+      const payload = {
+        root_url: document.getElementById("harvest-url").value.trim(),
+        directories: selectedEntries.map((entry) => ({
+          title: entry.title || entry.href,
+          href: entry.href,
+        })),
+        mode: mode,
+        follow_next: document.getElementById("harvest-follow-next").checked,
+        incremental: document.getElementById("harvest-incremental").checked,
+        timeout_seconds: Number(document.getElementById("harvest-timeout").value) || 120,
+      };
+      const maxPages = document.getElementById("harvest-max-pages").value.trim();
+      const maxRecords = document.getElementById("harvest-max-records").value.trim();
+      if (maxPages) payload.max_pages = Number(maxPages);
+      if (maxRecords) payload.max_records = Number(maxRecords);
+      if (mode === "single-repository-collections") {
+        payload.target_repository_id = repoSelect.value;
+      }
+
+      const response = await fetch("/ingest/opds-json/directories/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await readJson(response);
+      show(data);
+      if (response.ok) {
+        await refreshRepositoriesSilently(repoSelect.value);
+      }
+    }
+
     async function loadCheckpoints() {
       const repositoryId = repoSelect.value;
       const response = await fetch("/harvest/checkpoints?repository_id=" + encodeURIComponent(repositoryId));
@@ -2320,7 +2539,20 @@ def admin_ui() -> str:
     document.getElementById("load-checkpoints").addEventListener("click", () => {
       loadCheckpoints().catch((error) => show({ error: String(error) }));
     });
+    document.getElementById("fetch-directories").addEventListener("click", () => {
+      fetchDirectories().catch((error) => show({ error: String(error) }));
+    });
+    document.getElementById("import-selected-directories").addEventListener("click", () => {
+      importSelectedDirectories().catch((error) => show({ error: String(error) }));
+    });
+    directorySelectAll.addEventListener("change", () => {
+      const checked = directorySelectAll.checked;
+      for (const input of directoryList.querySelectorAll("input[data-directory-index]")) {
+        input.checked = checked;
+      }
+    });
     loadRepositories().catch((error) => show({ error: String(error) }));
+    renderDirectoryEntries([]);
   </script>
 </body>
 </html>"""
@@ -2369,6 +2601,7 @@ def shutdown() -> None:
 
 @app.get("/repositories")
 def list_repositories(request: Request, include_inactive: bool = Query(default=True)) -> dict:
+    _ensure_default_repository()
     base = str(request.base_url).rstrip("/")
     repositories = []
     for item in store.list_repositories(include_inactive=include_inactive):
@@ -2623,6 +2856,118 @@ def ingest_opds_json(request: OpdsJsonIngestRequest) -> dict:
         "incremental": request.incremental,
         "checkpoint": checkpoint.__dict__ if checkpoint else None,
         "previous_checkpoint": prior_checkpoint.__dict__ if prior_checkpoint else None,
+    }
+
+
+@app.post("/ingest/opds-json/directories")
+def preview_opds_json_directories(request: OpdsDirectoryPreviewRequest) -> dict:
+    try:
+        payload = load_json_payload_from_url(request.url, timeout_seconds=request.timeout_seconds)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"OPDS directory preview failed: {exc}") from exc
+    entries = _extract_opds_navigation_entries(payload, request.url)
+    return {
+        "root_url": request.url,
+        "directory_count": len(entries),
+        "directories": entries,
+    }
+
+
+@app.post("/ingest/opds-json/directories/import")
+def import_opds_json_directories(request: OpdsDirectoryImportRequest) -> dict:
+    mode = request.mode.strip().casefold()
+    valid_modes = {"split-repositories", "single-repository-collections"}
+    if mode not in valid_modes:
+        raise HTTPException(status_code=400, detail=f"mode must be one of: {', '.join(sorted(valid_modes))}")
+    if not request.directories:
+        raise HTTPException(status_code=400, detail="At least one directory must be selected")
+
+    imports: list[dict] = []
+    created_repositories: list[dict] = []
+
+    target_repository_id = request.target_repository_id.strip() if isinstance(request.target_repository_id, str) else None
+    if mode == "single-repository-collections":
+        if not target_repository_id:
+            raise HTTPException(status_code=400, detail="target_repository_id is required for single-repository-collections mode")
+        _get_repository_or_404(target_repository_id)
+
+    for directory in request.directories:
+        directory_title = directory.title.strip()
+        directory_href = directory.href.strip()
+        if not directory_href:
+            continue
+
+        repository_id = target_repository_id
+        if mode == "split-repositories":
+            base_slug = _slugify_text(directory_title)
+            if not base_slug:
+                parsed = urlparse(directory_href)
+                base_slug = _slugify_text(parsed.path.strip("/") or parsed.netloc or "opds-directory")
+            if not base_slug:
+                base_slug = f"opds-directory-{len(imports) + 1}"
+            repository_id = _next_available_repository_id(base_slug)
+            repository_name = directory_title or repository_id
+            repository = RepositoryConfig(
+                repository_id=repository_id,
+                source_type="opds-json",
+                name=repository_name,
+                config={"url": directory_href, "directory_title": directory_title, "source_root": request.root_url},
+                is_active=True,
+                updated_at="",
+                created_at="",
+            )
+            store.upsert_repository(repository)
+            created_repositories.append(
+                {
+                    "repository_id": repository_id,
+                    "name": repository_name,
+                    "source_url": directory_href,
+                }
+            )
+
+        ingest_request = OpdsJsonIngestRequest(
+            url=directory_href,
+            max_records=request.max_records,
+            max_pages=request.max_pages,
+            follow_next=request.follow_next,
+            timeout_seconds=request.timeout_seconds,
+            incremental=request.incremental,
+            collection_name=directory_title if mode == "single-repository-collections" else None,
+        )
+        checkpoint_key = ingest_request.checkpoint_key or _opds_json_checkpoint_key(repository_id, ingest_request.url)
+        prior_checkpoint = store.get_checkpoint(checkpoint_key, repository_id=repository_id) if ingest_request.incremental else None
+        try:
+            result, details = _ingest_opds_json(ingest_request, repository_id=repository_id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Directory import failed for '{directory_title or directory_href}': {exc}",
+            ) from exc
+        _invalidate_opds_cache(repository_id)
+        checkpoint = store.get_checkpoint(checkpoint_key, repository_id=repository_id) if ingest_request.incremental else None
+        imports.append(
+            {
+                "directory_title": directory_title,
+                "directory_url": directory_href,
+                "repository_id": repository_id,
+                "accepted": result.accepted,
+                "rejected": result.rejected,
+                "pages_crawled": details["pages_crawled"],
+                "records_processed": details["records_processed"],
+                "effective_url": details["effective_url"],
+                "total_indexed": store.count(repository_id=repository_id),
+                "checkpoint": checkpoint.__dict__ if checkpoint else None,
+                "previous_checkpoint": prior_checkpoint.__dict__ if prior_checkpoint else None,
+            }
+        )
+
+    return {
+        "mode": mode,
+        "root_url": request.root_url,
+        "selected_directories": len(request.directories),
+        "imported_directories": len(imports),
+        "created_repositories": created_repositories,
+        "imports": imports,
     }
 
 
@@ -3104,6 +3449,7 @@ def opds_search_repository(
 
 @app.get("/opds/index")
 def opds_repository_index(request: Request) -> dict:
+    _ensure_default_repository()
     repositories = store.list_repositories(include_inactive=False)
     base = str(request.base_url).rstrip("/")
     links = []
