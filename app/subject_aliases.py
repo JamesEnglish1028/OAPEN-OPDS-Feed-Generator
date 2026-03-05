@@ -103,9 +103,11 @@ SUBJECT_ALIASES: dict[str, str] = {
     "italy": "Italy",
     "digital media": "Digital Media",
     "technology engineering": "Technology & Engineering",
+    "technology and engineering": "Technology & Engineering",
     "semiotics": "Semiotics",
     "agriculture": "Agriculture",
     "drawing": "Drawing",
+    "film": "Media Studies",
     "overheidsbeleid": "Public Policy",
     "literary criticism": "Literary Criticism",
 }

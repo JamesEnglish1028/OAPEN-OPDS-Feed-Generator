@@ -373,6 +373,7 @@ def resolve_thema(subject_name: str) -> list[dict[str, str]]:
 
     category = classify_subject_category(subject_name)
     category_key = ""
+    lcsh_keys: list[str] = []
     if category:
         category_key = _canonical_key(category)
         if category_key:
@@ -383,10 +384,11 @@ def resolve_thema(subject_name: str) -> list[dict[str, str]]:
         term = mapping.get("term", "")
         key = _canonical_key(term)
         if key:
+            lcsh_keys.append(key)
             _append(THEMA_STARTER_MAP.get(key, []))
 
     # Optional enrichment from remote THEMA label corpora.
-    for key in (subject_key, category_key):
+    for key in (subject_key, category_key, *lcsh_keys):
         if not key:
             continue
         _append(lookup.get(key, []))

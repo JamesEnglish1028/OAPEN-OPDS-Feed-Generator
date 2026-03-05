@@ -44,6 +44,38 @@ EXACT_CATEGORY_MAP: dict[str, str] = {
     "earth sciences geography environment planning": "Earth & Environment",
     "geology geomorphology and the lithosphere": "Earth & Environment",
     "law": "Law & Policy",
+    "politics": "Law & Policy",
+    "political science": "Law & Policy",
+    "public policy": "Law & Policy",
+    "democracy": "Law & Policy",
+    "gender studies": "Social Sciences",
+    "migration": "Social Sciences",
+    "media studies": "Language & Communication",
+    "digital media": "Language & Communication",
+    "literature": "Arts & Humanities",
+    "literary studies": "Arts & Humanities",
+    "literary criticism": "Arts & Humanities",
+    "culture": "Arts & Humanities",
+    "cultural studies": "Arts & Humanities",
+    "cultural history": "Arts & Humanities",
+    "film": "Arts & Humanities",
+    "art": "Arts & Humanities",
+    "drawing": "Arts & Humanities",
+    "religion": "Arts & Humanities",
+    "islam": "Arts & Humanities",
+    "europe": "Social Sciences",
+    "germany": "Social Sciences",
+    "china": "Social Sciences",
+    "africa": "Social Sciences",
+    "russia": "Social Sciences",
+    "united states": "Social Sciences",
+    "italy": "Social Sciences",
+    "european union": "Law & Policy",
+    "economics": "Business & Management",
+    "technology and engineering": "STEM",
+    "technology engineering": "STEM",
+    "agriculture": "Earth & Environment",
+    "semiotics": "Language & Communication",
 }
 
 
@@ -63,16 +95,20 @@ def classify_subject_category(subject_name: str) -> str | None:
         return "Information & Research"
     if any(token in key for token in ("business", "management", "marketing", "human resources", "sales")):
         return "Business & Management"
+    if any(token in key for token in ("economics", "economic", "finance", "commerce")):
+        return "Business & Management"
     if any(token in key for token in ("psychology", "sociology", "social", "indigenous", "society")):
         return "Social Sciences"
+    if any(token in key for token in ("politic", "policy", "governance", "democracy")):
+        return "Law & Policy"
     if any(token in key for token in ("medicine", "nursing", "anatomy", "health", "physiology", "medical")):
         return "Health & Medicine"
-    if any(token in key for token in ("mathematics", "biology", "chemistry", "artificial intelligence", "probability", "science")):
+    if any(token in key for token in ("mathematics", "biology", "chemistry", "artificial intelligence", "probability", "science", "technology", "engineering")):
         return "STEM"
-    if any(token in key for token in ("earth", "geology", "environment", "geography")):
+    if any(token in key for token in ("earth", "geology", "environment", "geography", "agriculture")):
         return "Earth & Environment"
     if "law" in key:
         return "Law & Policy"
-    if any(token in key for token in ("arts", "history", "philosophy", "music")):
+    if any(token in key for token in ("arts", "history", "philosophy", "music", "literature", "culture", "religion", "film", "drawing")):
         return "Arts & Humanities"
     return None
