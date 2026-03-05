@@ -128,6 +128,14 @@ SUBJECT_ALIASES: dict[str, str] = {
     "poetry": "Poetry",
     "covid 19": "COVID-19",
     "violence": "Violence",
+    "colonialism": "Colonialism",
+    "feminism": "Feminism",
+    "racism": "Racism",
+    "diversity": "Diversity",
+    "translation": "Translation",
+    "biography": "Biography",
+    "design": "Design",
+    "innovation": "Innovation",
 }
 
 
