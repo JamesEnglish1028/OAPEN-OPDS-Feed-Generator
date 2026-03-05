@@ -5,7 +5,7 @@ from typing import Any
 
 import requests
 
-from app.subject_aliases import subject_lookup_key
+from app.subject_aliases import canonicalize_subject_term, subject_lookup_key
 from app.subject_categories import classify_subject_category
 
 
@@ -36,6 +36,9 @@ THEMA_STARTER_MAP: dict[str, list[dict[str, str]]] = {
     "religion": [_thema("Religion and beliefs", "QR")],
     "islam": [_thema("Islam", "QRSF")],
     "law": [_thema("Law", "L")],
+    "public policy": [_thema("Politics and government", "JP")],
+    "democracy": [_thema("Politics and government", "JP")],
+    "european union": [_thema("Politics and government", "JP")],
     "literature": [_thema("Literature, literary studies and rhetoric", "DS")],
     "literary studies": [_thema("Literary studies: prose, narrative and genres", "DSA")],
     "literary criticism": [_thema("Literary studies: prose, narrative and genres", "DSA")],
@@ -44,6 +47,7 @@ THEMA_STARTER_MAP: dict[str, list[dict[str, str]]] = {
     "media": [_thema("Media studies", "JFD")],
     "media studies": [_thema("Media studies", "JFD")],
     "communication": [_thema("Communication studies", "JFC")],
+    "linguistics": [_thema("Language, linguistics and communication", "C")],
     "psychology": [_thema("Psychology", "JM")],
     "gender": [_thema("Gender studies: women and girls", "JBSF1")],
     "gender studies": [_thema("Gender studies: women and girls", "JBSF1")],
@@ -54,12 +58,15 @@ THEMA_STARTER_MAP: dict[str, list[dict[str, str]]] = {
     "technology": [_thema("Technology, engineering, agriculture", "T")],
     "digitalization": [_thema("Digital technology: general", "UBJ")],
     "digital media": [_thema("Digital media and online communication", "JFDU")],
+    "film": [_thema("Media studies", "JFD")],
     "earth & environment": [_thema("Earth sciences, geography, environment, planning", "R")],
     "environment": [_thema("The environment", "RNK")],
+    "climate change": [_thema("The environment", "RNK")],
     "medicine": [_thema("Medicine and nursing", "M")],
     "health & medicine": [_thema("Medicine and nursing", "M")],
     "nursing": [_thema("Nursing", "MQC")],
     "economics": [_thema("Economics", "KC")],
+    "business & economics": [_thema("Economics, finance, business and management", "K")],
     "business & management": [_thema("Business and management", "KJ")],
     "business and management": [_thema("Business and management", "KJ")],
     "human resources": [_thema("Human resource management", "KJMB")],
@@ -69,6 +76,13 @@ THEMA_STARTER_MAP: dict[str, list[dict[str, str]]] = {
     "art": [_thema("The arts", "A")],
     "drawing": [_thema("Drawing and drawings", "AFC")],
     "agriculture": [_thema("Agriculture and farming", "TV")],
+    "sustainability": [_thema("The environment", "RNK")],
+    "middle ages": [_thema("History", "NH")],
+    "language arts & disciplines": [_thema("Language, linguistics and communication", "C")],
+    "language arts and disciplines": [_thema("Language, linguistics and communication", "C")],
+    "semiotics": [_thema("Language, linguistics and communication", "C")],
+    "slavic linguistics": [_thema("Language, linguistics and communication", "C")],
+    "architecture": [_thema("The arts", "A")],
     "open access": [_thema("Library and information studies / archivistics", "GL")],
 }
 
@@ -321,7 +335,8 @@ LCSH_SUBJECT_MAP: dict[str, list[dict[str, str]]] = {
 
 
 def _canonical_key(subject_name: str) -> str:
-    return subject_lookup_key(subject_name)
+    canonical = canonicalize_subject_term(subject_name)
+    return subject_lookup_key(canonical)
 
 
 def resolve_lcc(subject_name: str) -> dict[str, str] | None:
