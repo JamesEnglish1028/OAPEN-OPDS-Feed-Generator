@@ -1997,18 +1997,18 @@ def admin_ui() -> str:
               <button type="button" class="ghost" id="load-checkpoints">Load Checkpoints</button>
             </div>
             <div style="margin-top:14px;">
-              <label for="directory-import-mode">Directory Import Mode</label>
-              <select id="directory-import-mode">
-                <option value="split-repositories">Create one repository per selected directory</option>
-                <option value="single-repository-collections">Ingest selected directories as collections in selected repository</option>
-              </select>
+              <label>Import Strategy</label>
+              <label class="check"><input id="directory-mode-split" type="radio" name="directory_import_mode" value="split-repositories" checked> Create one repository per selected directory</label>
+              <label class="check"><input id="directory-mode-single" type="radio" name="directory_import_mode" value="single-repository-collections"> Import selected directories into the selected repository as collections</label>
+              <p id="directory-import-summary" class="hint" style="margin: 6px 0 0;">Select directories to see what will happen.</p>
             </div>
             <div style="margin-top:10px;">
               <label class="check"><input id="directory-select-all" type="checkbox"> Select all fetched directories</label>
               <div id="directory-list" class="list" style="max-height:220px;"></div>
             </div>
             <div class="actions" style="margin-top:10px;">
-              <button type="button" id="import-selected-directories">Import Selected Directories</button>
+              <button type="button" id="import-as-repositories">Create Repositories</button>
+              <button type="button" id="import-into-repository" class="secondary">Import Into Selected Repository</button>
             </div>
           </form>
         </div>
@@ -2127,6 +2127,41 @@ def admin_ui() -> str:
       return selected;
     }
 
+    function currentDirectoryImportMode() {
+      const selected = document.querySelector('input[name="directory_import_mode"]:checked');
+      if (!selected || typeof selected.value !== "string") {
+        return "split-repositories";
+      }
+      return selected.value;
+    }
+
+    function updateDirectoryImportSummary() {
+      const summary = document.getElementById("directory-import-summary");
+      const selectedEntries = getCheckedDirectoryEntries();
+      const selectedCount = selectedEntries.length;
+      const mode = currentDirectoryImportMode();
+      const targetRepository = repoSelect.value || "(none)";
+      if (selectedCount === 0) {
+        summary.textContent = "Select one or more directories to import.";
+        return;
+      }
+      if (mode === "split-repositories") {
+        summary.textContent = "This will create " + selectedCount + " repository" + (selectedCount === 1 ? "" : "ies") + " from the selected directories.";
+        return;
+      }
+      summary.textContent = "This will import " + selectedCount + " directories into repository '" + targetRepository + "' as collections.";
+    }
+
+    function syncDirectoryImportModeUi() {
+      const mode = currentDirectoryImportMode();
+      const splitButton = document.getElementById("import-as-repositories");
+      const singleButton = document.getElementById("import-into-repository");
+      splitButton.disabled = mode !== "split-repositories";
+      singleButton.disabled = mode !== "single-repository-collections";
+      maybeAutofillSplitRepositoryConfig();
+      updateDirectoryImportSummary();
+    }
+
     function renderDirectoryEntries(entries) {
       directoryEntries = Array.isArray(entries) ? entries : [];
       directoryList.innerHTML = "";
@@ -2152,14 +2187,16 @@ def admin_ui() -> str:
         if (checkbox) {
           checkbox.addEventListener("change", () => {
             maybeAutofillSplitRepositoryConfig();
+            updateDirectoryImportSummary();
           });
         }
         directoryList.appendChild(row);
       });
+      updateDirectoryImportSummary();
     }
 
     function maybeAutofillSplitRepositoryConfig() {
-      const mode = document.getElementById("directory-import-mode").value;
+      const mode = currentDirectoryImportMode();
       if (mode !== "split-repositories") {
         return;
       }
@@ -2518,13 +2555,13 @@ def admin_ui() -> str:
       }
     }
 
-    async function importSelectedDirectories() {
+    async function importSelectedDirectories(modeOverride) {
       const selectedEntries = getCheckedDirectoryEntries();
       if (!selectedEntries.length) {
         show({ error: "Select at least one directory to import." });
         return;
       }
-      const mode = document.getElementById("directory-import-mode").value;
+      const mode = modeOverride || currentDirectoryImportMode();
       const payload = {
         root_url: document.getElementById("harvest-url").value.trim(),
         directories: selectedEntries.map((entry) => ({
@@ -2553,6 +2590,7 @@ def admin_ui() -> str:
       show(data);
       if (response.ok) {
         await refreshRepositoriesSilently(repoSelect.value);
+        updateDirectoryImportSummary();
       }
     }
 
@@ -2578,11 +2616,20 @@ def admin_ui() -> str:
     document.getElementById("fetch-directories").addEventListener("click", () => {
       fetchDirectories().catch((error) => show({ error: String(error) }));
     });
-    document.getElementById("import-selected-directories").addEventListener("click", () => {
-      importSelectedDirectories().catch((error) => show({ error: String(error) }));
+    document.getElementById("import-as-repositories").addEventListener("click", () => {
+      importSelectedDirectories("split-repositories").catch((error) => show({ error: String(error) }));
     });
-    document.getElementById("directory-import-mode").addEventListener("change", () => {
-      maybeAutofillSplitRepositoryConfig();
+    document.getElementById("import-into-repository").addEventListener("click", () => {
+      importSelectedDirectories("single-repository-collections").catch((error) => show({ error: String(error) }));
+    });
+    document.getElementById("directory-mode-split").addEventListener("change", () => {
+      syncDirectoryImportModeUi();
+    });
+    document.getElementById("directory-mode-single").addEventListener("change", () => {
+      syncDirectoryImportModeUi();
+    });
+    repoSelect.addEventListener("change", () => {
+      updateDirectoryImportSummary();
     });
     directorySelectAll.addEventListener("change", () => {
       const checked = directorySelectAll.checked;
@@ -2590,9 +2637,11 @@ def admin_ui() -> str:
         input.checked = checked;
       }
       maybeAutofillSplitRepositoryConfig();
+      updateDirectoryImportSummary();
     });
     loadRepositories().catch((error) => show({ error: String(error) }));
     renderDirectoryEntries([]);
+    syncDirectoryImportModeUi();
   </script>
 </body>
 </html>"""
