@@ -33,6 +33,7 @@ DEFAULT_REPOSITORY_NAME = "Default OPDS Repository"
 COLLECTION_FACET_LINK_LIMIT = max(1, int(os.getenv("OPDS_COLLECTION_FACET_LINK_LIMIT", "100")))
 CLASSIFICATION_FACET_LINK_LIMIT = max(1, int(os.getenv("OPDS_CLASSIFICATION_FACET_LINK_LIMIT", "100")))
 SUBCLASSIFICATION_FACET_LINK_LIMIT = max(1, int(os.getenv("OPDS_SUBCLASSIFICATION_FACET_LINK_LIMIT", "100")))
+ROOT_NAV_GROUP_LINK_LIMIT = max(1, int(os.getenv("OPDS_ROOT_NAV_GROUP_LINK_LIMIT", "8")))
 
 app = FastAPI(title="OAPEN OPDS Feed Generator", version="0.2.0")
 logger = logging.getLogger(__name__)
@@ -2700,10 +2701,15 @@ def _opds_feed_for_repository(
         )
 
         languages = store.list_language_counts(repository_id=repository_id)
-        lcc_headings = store.list_lcc_heading_counts(repository_id=repository_id, min_count=3, limit=10, offset=0)
+        lcc_headings = store.list_lcc_heading_counts(
+            repository_id=repository_id,
+            min_count=3,
+            limit=ROOT_NAV_GROUP_LINK_LIMIT,
+            offset=0,
+        )
         collection_items = store.list_collection_counts_limited(
             repository_id=repository_id,
-            limit=10,
+            limit=ROOT_NAV_GROUP_LINK_LIMIT,
             offset=0,
             order_by_count_desc=True,
         )
@@ -2716,7 +2722,7 @@ def _opds_feed_for_repository(
                 "rel": "subsection",
                 "properties": {"numberOfItems": int(item["count"])},
             }
-            for item in languages[:10]
+            for item in languages[:ROOT_NAV_GROUP_LINK_LIMIT]
         ]
         language_group_links.append(
             {
