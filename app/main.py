@@ -283,6 +283,39 @@ def _extract_opds_next_url(payload: object, current_url: str) -> str | None:
     return None
 
 
+def _extract_opds_navigation_urls(payload: object, current_url: str) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+    candidates: list[str] = []
+
+    def _append_from_links(value: object) -> None:
+        if not isinstance(value, list):
+            return
+        for link in value:
+            if not isinstance(link, dict):
+                continue
+            href = link.get("href")
+            if isinstance(href, str) and href.strip():
+                candidates.append(urljoin(current_url, href.strip()))
+
+    _append_from_links(payload.get("navigation"))
+    groups = payload.get("groups")
+    if isinstance(groups, list):
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            _append_from_links(group.get("navigation"))
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        deduped.append(candidate)
+    return deduped
+
+
 def _ingest_opds_json(request: OpdsJsonIngestRequest, repository_id: str = DEFAULT_REPOSITORY_ID) -> tuple[IngestResult, dict]:
     result = IngestResult(accepted=0, rejected=0, errors=[])
     last_invalidation_count = 0
@@ -299,14 +332,20 @@ def _ingest_opds_json(request: OpdsJsonIngestRequest, repository_id: str = DEFAU
     records_processed = 0
     last_url = effective_url
     next_url_to_store = request.url
+    state = checkpoint.state if checkpoint and isinstance(checkpoint.state, dict) else {}
+    pending_urls = [item for item in state.get("pending_urls", []) if isinstance(item, str) and item.strip()]
+    visited_urls = set(item for item in state.get("visited_urls", []) if isinstance(item, str) and item.strip())
 
     while current_url:
+        visited_urls.add(current_url)
         payload = load_json_payload_from_url(current_url, timeout_seconds=request.timeout_seconds)
         last_url = current_url
         pages_crawled += 1
+        page_records = 0
         for raw in extract_json_records(payload):
             normalized = normalize_json_record(raw)
             records_processed += 1
+            page_records += 1
             if normalized is None:
                 result.rejected += 1
             else:
@@ -321,17 +360,43 @@ def _ingest_opds_json(request: OpdsJsonIngestRequest, repository_id: str = DEFAU
                 break
 
         next_url = _extract_opds_next_url(payload, current_url) if request.follow_next else None
+        if request.follow_next and not next_url and page_records == 0:
+            for candidate in _extract_opds_navigation_urls(payload, current_url):
+                if candidate in visited_urls or candidate in pending_urls:
+                    continue
+                pending_urls.append(candidate)
+
         if request.max_records and records_processed >= request.max_records:
-            next_url_to_store = next_url or request.url
+            if next_url:
+                next_url_to_store = next_url
+            elif pending_urls:
+                next_url_to_store = pending_urls[0]
+            else:
+                next_url_to_store = request.url
             break
         if request.max_pages and pages_crawled >= request.max_pages:
-            next_url_to_store = next_url or request.url
+            if next_url:
+                next_url_to_store = next_url
+            elif pending_urls:
+                next_url_to_store = pending_urls[0]
+            else:
+                next_url_to_store = request.url
             break
-        if not request.follow_next or not next_url:
+        if not request.follow_next:
             next_url_to_store = request.url
             break
-        next_url_to_store = next_url
-        current_url = next_url
+        if next_url:
+            next_url_to_store = next_url
+            current_url = next_url
+            continue
+        while pending_urls and pending_urls[0] in visited_urls:
+            pending_urls.pop(0)
+        if pending_urls:
+            next_url_to_store = pending_urls[0]
+            current_url = pending_urls.pop(0)
+            continue
+        next_url_to_store = request.url
+        break
 
     if request.incremental:
         store.upsert_checkpoint(
@@ -348,6 +413,8 @@ def _ingest_opds_json(request: OpdsJsonIngestRequest, repository_id: str = DEFAU
                 "last_url": last_url,
                 "pages_crawled": pages_crawled,
                 "records_processed": records_processed,
+                "pending_urls": pending_urls[:500],
+                "visited_urls": list(visited_urls)[-2000:],
             },
         )
 
