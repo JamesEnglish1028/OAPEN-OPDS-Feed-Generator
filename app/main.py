@@ -2270,6 +2270,7 @@ def health() -> dict:
         "scheduler_running": harvest_scheduler.is_running() if scheduler_enabled else False,
         "opds_cache_enabled": opds_cache.is_enabled(),
         "opds_cache_invalidate_every_n_upserts": _cache_invalidate_every_n_upserts(),
+        "root_nav_group_link_limit": ROOT_NAV_GROUP_LINK_LIMIT,
         "repositories": len(store.list_repositories()),
     }
 
