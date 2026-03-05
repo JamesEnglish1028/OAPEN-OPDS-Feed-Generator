@@ -99,6 +99,26 @@ THEMA_CATEGORY_MAP: dict[str, list[dict[str, str]]] = {
     "education": [_thema("Education", "JN")],
 }
 
+THEMA_GEOGRAPHIC_KEYS: set[str] = {
+    "europe",
+    "germany",
+    "china",
+    "africa",
+    "russia",
+    "united states",
+    "italy",
+    "latin america",
+}
+
+
+def _is_geographic_subject_key(key: str) -> bool:
+    if not key:
+        return False
+    if key in THEMA_GEOGRAPHIC_KEYS:
+        return True
+    tokens = key.split()
+    return any(token in {"europe", "africa", "america", "asia"} for token in tokens)
+
 
 def _lcc(term: str, code: str) -> dict[str, str]:
     return {"scheme": "http://id.loc.gov", "term": term, "code": code}
@@ -389,7 +409,7 @@ def resolve_thema(subject_name: str) -> list[dict[str, str]]:
     category = classify_subject_category(subject_name)
     category_key = ""
     lcsh_keys: list[str] = []
-    if category:
+    if category and not _is_geographic_subject_key(subject_key):
         category_key = _canonical_key(category)
         if category_key:
             _append(THEMA_CATEGORY_MAP.get(category_key, []))
