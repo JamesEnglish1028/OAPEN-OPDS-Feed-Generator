@@ -13,6 +13,8 @@
     const maintenanceSelectedName = document.getElementById("maintenance-selected-name");
     const maintenanceReindexSubjects = document.getElementById("maintenance-reindex-subjects");
     const maintenanceReindexAuthorities = document.getElementById("maintenance-reindex-authorities");
+    const maintenanceInvalidateRepoCache = document.getElementById("maintenance-invalidate-repo-cache");
+    const maintenanceInvalidateAllCache = document.getElementById("maintenance-invalidate-all-cache");
     const maintenanceClearData = document.getElementById("maintenance-clear-data");
     const maintenanceDeleteRepository = document.getElementById("maintenance-delete-repository");
     const saveRepoButton = document.getElementById("save-repo");
@@ -403,6 +405,7 @@
         maintenanceSelectedName.textContent = "";
         maintenanceReindexSubjects.disabled = true;
         maintenanceReindexAuthorities.disabled = true;
+        maintenanceInvalidateRepoCache.disabled = true;
         maintenanceClearData.disabled = true;
         maintenanceDeleteRepository.disabled = true;
         return;
@@ -412,9 +415,29 @@
       maintenanceSelectedName.textContent = repo.name + " (" + repo.repository_id + ")";
       maintenanceReindexSubjects.disabled = false;
       maintenanceReindexAuthorities.disabled = false;
+      maintenanceInvalidateRepoCache.disabled = false;
       const isDefaultRepo = repo.repository_id === DEFAULT_REPOSITORY_ID;
       maintenanceClearData.disabled = isDefaultRepo;
       maintenanceDeleteRepository.disabled = isDefaultRepo;
+    }
+
+    async function invalidateCache(repositoryId) {
+      const body = {};
+      if (repositoryId) {
+        body.repository_id = repositoryId;
+      }
+      const response = await fetch("/admin/cache/invalidate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await readJson(response);
+      showActionResponse(repositoryId ? "Invalidate Repo Cache" : "Invalidate All Cache", response, data);
+      if (repositoryId) {
+        setHarvestResult(response.ok, response.ok ? "Repo Cache Invalidated" : "Repo Cache Invalidate Failed");
+      } else {
+        setHarvestResult(response.ok, response.ok ? "Global Cache Invalidated" : "Global Cache Invalidate Failed");
+      }
     }
 
     function renderRepositories(payload, preferredRepositoryId) {
@@ -843,6 +866,16 @@
         return;
       }
       backfillSubjectAuthorities(selectedRepository.repository_id).catch((error) => show({ error: String(error) }));
+    });
+    maintenanceInvalidateRepoCache.addEventListener("click", () => {
+      if (!selectedRepository) {
+        show({ error: "Select a repository first." });
+        return;
+      }
+      invalidateCache(selectedRepository.repository_id).catch((error) => show({ error: String(error) }));
+    });
+    maintenanceInvalidateAllCache.addEventListener("click", () => {
+      invalidateCache("").catch((error) => show({ error: String(error) }));
     });
     maintenanceClearData.addEventListener("click", () => {
       if (!selectedRepository) {

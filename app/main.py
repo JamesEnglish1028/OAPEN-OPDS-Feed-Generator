@@ -134,6 +134,10 @@ class SubjectBackfillRequest(BaseModel):
     offset: int | None = Field(default=None, ge=0)
 
 
+class CacheInvalidateRequest(BaseModel):
+    repository_id: str | None = None
+
+
 def _as_list(value):
     if value is None:
         return []
@@ -1491,17 +1495,16 @@ def _attach_year_browse_facets(request: Request, response: dict, repository_id: 
     return response
 
 
-def _invalidate_opds_cache(repository_id: str | None = None) -> None:
+def _invalidate_opds_cache(repository_id: str | None = None) -> int:
     if repository_id is None:
-        opds_cache.invalidate_feed_keys()
-        return
+        return int(opds_cache.invalidate_feed_keys())
     namespace = _cache_namespace(repository_id)
     try:
-        opds_cache.invalidate_feed_keys(namespace=namespace)
+        return int(opds_cache.invalidate_feed_keys(namespace=namespace))
     except TypeError:
         # Backward-compatibility for older cache fakes/tests that only expose
         # invalidate_feed_keys() without a namespace parameter.
-        opds_cache.invalidate_feed_keys()
+        return int(opds_cache.invalidate_feed_keys())
 
 
 def _cached_opds_response(request: Request, builder, repository_id: str) -> dict:
@@ -3682,6 +3685,17 @@ def publication_for_repository(repository_id: str, publication_id: str, request:
 def harvest_checkpoints(repository_id: str = Query(default=DEFAULT_REPOSITORY_ID)) -> dict:
     checkpoints = [item.__dict__ for item in store.list_checkpoints(repository_id=repository_id)]
     return {"count": len(checkpoints), "checkpoints": checkpoints}
+
+
+@app.post("/admin/cache/invalidate")
+def admin_invalidate_cache(request: CacheInvalidateRequest) -> dict:
+    repository_id = (request.repository_id or "").strip()
+    if repository_id:
+        _get_repository_or_404(repository_id)
+        removed = _invalidate_opds_cache(repository_id)
+        return {"scope": "repository", "repository_id": repository_id, "removed_keys": removed}
+    removed = _invalidate_opds_cache()
+    return {"scope": "global", "removed_keys": removed}
 
 
 @app.get("/repositories/{repository_id}/classifications/stats")
