@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OPDS Admin</title>
+  <link rel="stylesheet" href="/static/admin.css">
+
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Operator Console</div>
+      <h1>Multi-Repository OPDS Admin</h1>
+      <p class="sub">Manage repository definitions, seed new OPDS-like JSON harvests, and inspect checkpoints without posting raw JSON by hand. This wraps the same API routes the service already exposes.</p>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div class="section-kicker">Workflow</div>
+        <h2 class="section-title">Operator Tasks</h2>
+        <p class="section-copy">Use these task views to reduce context switching: configure repositories, run ingestion, then perform maintenance.</p>
+      </div>
+      <div class="flow-nav" role="tablist" aria-label="Operator task views">
+        <button type="button" id="view-repositories" data-view-button="repositories" class="active">Repositories</button>
+        <button type="button" id="view-ingest" data-view-button="ingest">Ingest</button>
+        <button type="button" id="view-maintenance" data-view-button="maintenance">Maintenance</button>
+      </div>
+    </section>
+
+    <section class="section view-panel" data-view="repositories">
+      <div class="section-head">
+        <div class="section-kicker">Repositories</div>
+        <h2 class="section-title">Configure And Inspect Repositories</h2>
+        <p class="section-copy">Create or update repository definitions, browse known repositories, and inspect selected repository details.</p>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <h2>Repository Configuration</h2>
+          <p class="hint">Create or update a repository. Use <code>source_type</code> <code>opds-json</code> for remote OPDS-like feeds.</p>
+          <form id="repo-form">
+            <div class="row">
+              <div>
+                <label for="repo-id">Repository ID</label>
+                <input id="repo-id" name="repository_id" placeholder="example-repo" required>
+              </div>
+              <div>
+                <label for="repo-name">Name</label>
+                <input id="repo-name" name="name" placeholder="Example Repository" required>
+              </div>
+            </div>
+            <div class="row">
+              <div>
+                <label for="repo-type">Source Type</label>
+                <select id="repo-type" name="source_type">
+                  <option value="opds-json">opds-json</option>
+                  <option value="json">json</option>
+                  <option value="oai-pmh">oai-pmh</option>
+                  <option value="mixed">mixed</option>
+                </select>
+              </div>
+              <div>
+                <label for="repo-config">Config JSON</label>
+                <textarea id="repo-config" name="config" placeholder="{}">{}</textarea>
+              </div>
+            </div>
+            <label class="check"><input id="repo-active" type="checkbox" checked> Active repository</label>
+            <div class="actions">
+              <button type="submit" id="save-repo">Save Repository</button>
+              <button type="button" class="ghost" id="refresh-repos">Refresh List</button>
+            </div>
+          </form>
+        </div>
+        <div class="card">
+          <h2>Known Repositories</h2>
+          <p id="repo-summary" class="summary">Loading repositories...</p>
+          <div class="actions" style="margin-bottom:10px;">
+            <button type="button" class="ghost" id="refresh-repos-manage">Refresh Repository List</button>
+          </div>
+          <p class="hint">Select a repository to inspect details, load it into the form, and route into ingest/maintenance workflows.</p>
+          <div id="repo-list" class="list"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Selected Repository</h2>
+        <p id="repo-detail-empty" class="summary">Select a repository card to inspect its current configuration and load it into the edit form.</p>
+        <div id="repo-detail" class="detail-grid" hidden></div>
+        <div id="repo-detail-actions" class="detail-actions" hidden></div>
+      </div>
+    </section>
+
+    <section class="section view-panel" data-view="ingest" hidden>
+      <div class="section-head">
+        <div class="section-kicker">Ingest</div>
+        <h2 class="section-title">Run Harvests And Directory Imports</h2>
+        <p class="section-copy">Pick a repository target, ingest directly from feed URLs, and import discovered directories.</p>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <h2>Harvest OPDS-Like JSON</h2>
+          <p class="hint">Seed a repository from a remote OPDS feed. For sparse OPDS roots, fetch directories first, select what to import, and choose import mode.</p>
+          <form id="harvest-form">
+            <div>
+              <label for="harvest-repo">Repository</label>
+              <select id="harvest-repo" name="repository_id"></select>
+            </div>
+            <div>
+              <label for="harvest-url">Remote Feed URL</label>
+              <input id="harvest-url" name="url" type="url" placeholder="https://example.org/catalog.json" required>
+            </div>
+            <div class="row-3">
+              <div>
+                <label for="harvest-max-pages">Max Pages</label>
+                <input id="harvest-max-pages" name="max_pages" type="number" min="1" placeholder="5">
+              </div>
+              <div>
+                <label for="harvest-max-records">Max Records</label>
+                <input id="harvest-max-records" name="max_records" type="number" min="1" placeholder="250">
+              </div>
+              <div>
+                <label for="harvest-timeout">Timeout (s)</label>
+                <input id="harvest-timeout" name="timeout_seconds" type="number" min="1" max="600" value="120">
+              </div>
+            </div>
+            <label class="check"><input id="harvest-follow-next" type="checkbox" checked> Follow <code>rel: next</code> links</label>
+            <label class="check"><input id="harvest-incremental" type="checkbox" checked> Persist checkpoint for scheduled harvests</label>
+            <div class="actions">
+              <button type="submit" class="secondary" id="start-harvest">Start Harvest</button>
+              <button type="button" class="ghost" id="fetch-directories">Fetch Directories</button>
+              <button type="button" class="ghost" id="load-checkpoints">Load Checkpoints</button>
+            </div>
+            <p id="harvest-action-hint" class="hint" style="margin: 6px 0 0;">Enter a feed URL to begin.</p>
+            <div style="margin-top:14px;">
+              <label>Import Strategy</label>
+              <label class="check"><input id="directory-mode-split" type="radio" name="directory_import_mode" value="split-repositories" checked> Create one repository per selected directory</label>
+              <label class="check"><input id="directory-mode-single" type="radio" name="directory_import_mode" value="single-repository-collections"> Import selected directories into the selected repository as collections</label>
+              <p id="directory-import-summary" class="hint" style="margin: 6px 0 0;">Select directories to see what will happen.</p>
+            </div>
+            <div style="margin-top:10px;">
+              <label class="check"><input id="directory-select-all" type="checkbox"> Select all fetched directories</label>
+              <div id="directory-list" class="list" style="max-height:220px;"></div>
+            </div>
+            <div class="actions" style="margin-top:10px;">
+              <button type="button" id="import-as-repositories">Create Repositories</button>
+              <button type="button" id="import-into-repository" class="secondary">Import Into Selected Repository</button>
+            </div>
+            <div id="harvest-status" class="status-pill" aria-live="polite">
+              <span class="dot"></span>
+              <span id="harvest-status-text">Idle</span>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section class="section view-panel" data-view="maintenance" hidden>
+      <div class="section-head">
+        <div class="section-kicker">Maintenance</div>
+        <h2 class="section-title">Reindex, Clear, And Remove Repositories</h2>
+        <p class="section-copy">Run maintenance actions against the selected repository. Destructive actions are isolated in a dedicated danger zone.</p>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <h2>Selected Repository Maintenance</h2>
+          <p id="maintenance-empty" class="summary">Select a repository in the Repositories view to run maintenance actions.</p>
+          <div id="maintenance-selected" hidden>
+            <p id="maintenance-selected-name" class="summary"></p>
+            <p class="hint">Reindex actions refresh subject indexes without deleting repository data.</p>
+            <div class="actions">
+              <button type="button" id="maintenance-reindex-subjects" class="secondary">Reindex Subjects</button>
+              <button type="button" id="maintenance-reindex-authorities" class="secondary">Reindex Subject Authorities</button>
+            </div>
+          </div>
+        </div>
+        <div class="card danger-zone">
+          <h2>Danger Zone</h2>
+          <p class="hint">These actions are irreversible. <strong>Clear Data</strong> preserves configuration but removes harvested records and checkpoints. <strong>Delete Repository</strong> removes everything.</p>
+          <div class="actions">
+            <button type="button" id="maintenance-clear-data" class="ghost danger">Clear Data</button>
+            <button type="button" id="maintenance-delete-repository" class="danger">Delete Repository</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div class="section-kicker">Output</div>
+        <h2 class="section-title">Request Output</h2>
+        <p class="section-copy">All API responses from configuration, harvest, and management actions are shown here.</p>
+      </div>
+      <div class="stack">
+        <div class="card">
+          <h2>Output</h2>
+          <pre id="output">Ready.</pre>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script src="/static/admin.js" defer></script>
+
+</body>
+</html>
