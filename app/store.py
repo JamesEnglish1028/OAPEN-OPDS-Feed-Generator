@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Index, String, Text, and_, create_engine, func as sqla_func, or_, select
+from sqlalchemy import Boolean, DateTime, Index, String, Text, and_, create_engine, func as sqla_func, or_, select, text as sqla_text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql import func
@@ -191,6 +191,36 @@ class PublicationStore:
 
     def initialize(self) -> None:
         Base.metadata.create_all(self._engine)
+        self._ensure_publications_compat_columns()
+
+    def _ensure_publications_compat_columns(self) -> None:
+        # Operational safety net for SQLite deployments where Alembic may fail
+        # but newer ORM code still expects recently-added columns.
+        if self._is_postgres:
+            return
+        required_columns = {
+            "repository_id": "TEXT NOT NULL DEFAULT 'default'",
+            "source_publication_id": "TEXT",
+            "subject_authorities_json": "TEXT NOT NULL DEFAULT '[]'",
+            "collection": "TEXT",
+            "collection_slug": "TEXT",
+            "series_name": "TEXT",
+            "series_slug": "TEXT",
+            "series_position": "INTEGER",
+            "publisher_slug": "TEXT",
+            "publication_year": "INTEGER",
+        }
+        with self._session() as session:
+            existing_columns = {
+                str(row[1])
+                for row in session.execute(sqla_text("PRAGMA table_info(publications)")).all()
+                if len(row) > 1
+            }
+            for column_name, column_ddl in required_columns.items():
+                if column_name in existing_columns:
+                    continue
+                session.execute(sqla_text(f"ALTER TABLE publications ADD COLUMN {column_name} {column_ddl}"))
+            session.commit()
 
     def _session(self) -> Session:
         return Session(self._engine)
