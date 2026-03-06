@@ -350,7 +350,7 @@ def test_classification_subject_navigation_links_match_non_empty_subject_feeds(t
     assert subject_nav
 
     first_subject = subject_nav[0]
-    expected_count = int(first_subject.get("properties", {}).get("numberOfItems", 0))
+    expected_count = int(first_subject.get("numberOfItems", 0))
     subject_path = urlparse(first_subject["href"]).path
     subject_feed = client.get(subject_path)
     assert subject_feed.status_code == 200

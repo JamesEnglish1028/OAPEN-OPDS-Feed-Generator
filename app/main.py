@@ -1061,7 +1061,7 @@ def _build_collections_index_response(
             "type": "application/opds+json",
             "title": item["name"],
             "rel": "subsection",
-            "properties": {"numberOfItems": int(item["count"])},
+            "numberOfItems": int(item["count"]),
         }
         for item in items
     ]
@@ -1135,7 +1135,7 @@ def _build_classifications_index_response(
             "type": "application/opds+json",
             "title": item["name"],
             "rel": "subsection",
-            "properties": {"numberOfItems": int(item["count"])},
+            "numberOfItems": int(item["count"]),
         }
         for item in items
     ]
@@ -1204,7 +1204,7 @@ def _build_languages_index_response(
             "type": "application/opds+json",
             "title": _language_label(str(item["code"])),
             "rel": "subsection",
-            "properties": {"numberOfItems": int(item["count"])},
+            "numberOfItems": int(item["count"]),
         }
         for item in items
     ]
@@ -1270,7 +1270,7 @@ def _build_lcc_index_response(
             "type": "application/opds+json",
             "title": f"{item['term']} ({item['code']})",
             "rel": "subsection",
-            "properties": {"numberOfItems": int(item["count"])},
+            "numberOfItems": int(item["count"]),
         }
         for item in items
     ]
@@ -1342,7 +1342,7 @@ def _build_subclassifications_index_response(
             "type": "application/opds+json",
             "title": item["name"],
             "rel": "subsection",
-            "properties": {"numberOfItems": int(item["count"])},
+            "numberOfItems": int(item["count"]),
         }
         for item in items
     ]
@@ -1435,7 +1435,7 @@ def _attach_language_facets(request: Request, response: dict, language_counts: l
                     "href": _build_url(request, f"{_language_path_prefix(repository_id)}/{item['code']}", {}),
                     "type": "application/opds+json",
                     "title": _language_label(str(item["code"])),
-                    "properties": {"numberOfItems": int(item["count"])},
+                    "numberOfItems": int(item["count"]),
                 }
                 for item in language_counts
             ],
@@ -1471,7 +1471,7 @@ def _attach_year_language_facets(
                     "href": _build_url(request, f"{start_path}/languages/{item['code']}", {}),
                     "type": "application/opds+json",
                     "title": _language_label(str(item["code"])),
-                    "properties": {"numberOfItems": int(item["count"])},
+                    "numberOfItems": int(item["count"]),
                 }
                 for item in language_counts
             ],
@@ -1493,7 +1493,7 @@ def _attach_browse_facets(request: Request, response: dict, repository_id: str) 
             "href": _build_url(request, f"{collection_prefix}/{item['slug']}", {}),
             "type": "application/opds+json",
             "title": item["name"],
-            "properties": {"numberOfItems": int(item["count"])},
+            "numberOfItems": int(item["count"]),
         }
         for item in store.list_collection_counts_limited(
             repository_id=repository_id,
@@ -1508,7 +1508,7 @@ def _attach_browse_facets(request: Request, response: dict, repository_id: str) 
             "href": _build_url(request, f"{_classification_path_prefix(repository_id)}/{item['slug']}", {}),
             "type": "application/opds+json",
             "title": item["name"],
-            "properties": {"numberOfItems": int(item["count"])},
+            "numberOfItems": int(item["count"]),
         }
         for item in store.list_category_counts(
             repository_id=repository_id,
@@ -1567,7 +1567,7 @@ def _attach_year_browse_facets(request: Request, response: dict, repository_id: 
             "href": _build_url(request, f"{year_prefix}/collections/{item['slug']}", {}),
             "type": "application/opds+json",
             "title": item["name"],
-            "properties": {"numberOfItems": int(item["count"])},
+            "numberOfItems": int(item["count"]),
         }
         for item in store.list_collection_counts_by_publication_year(
             year=year,
@@ -1582,7 +1582,7 @@ def _attach_year_browse_facets(request: Request, response: dict, repository_id: 
             "href": _build_url(request, f"{year_prefix}/classifications/{item['slug']}", {}),
             "type": "application/opds+json",
             "title": item["name"],
-            "properties": {"numberOfItems": int(item["count"])},
+            "numberOfItems": int(item["count"]),
         }
         for item in store.list_category_counts_by_publication_year(
             year=year,
@@ -1690,7 +1690,7 @@ def _attach_subclassification_facets(
             ),
             "type": "application/opds+json",
             "title": item["name"],
-            "properties": {"numberOfItems": int(item["count"])},
+            "numberOfItems": int(item["count"]),
         }
         for item in subject_items
     ]
@@ -2351,7 +2351,8 @@ def _opds_feed_for_repository(
                 "title": _language_label(str(item["code"])),
                 "type": "application/opds+json",
                 "rel": "subsection",
-                "properties": {"numberOfItems": int(item["count"])},
+                "numberOfItems": int(item["count"]),
+                "numberOfItems": int(item["count"]),
             }
             for item in languages[:ROOT_NAV_GROUP_LINK_LIMIT]
         ]
@@ -2370,7 +2371,8 @@ def _opds_feed_for_repository(
                 "title": f"{item['term']} ({item['code']})",
                 "type": "application/opds+json",
                 "rel": "subsection",
-                "properties": {"numberOfItems": int(item["count"])},
+                "numberOfItems": int(item["count"]),
+                "numberOfItems": int(item["count"]),
             }
             for item in lcc_headings
         ]
@@ -2389,7 +2391,8 @@ def _opds_feed_for_repository(
                 "title": item["name"],
                 "type": "application/opds+json",
                 "rel": "subsection",
-                "properties": {"numberOfItems": int(item["count"])},
+                "numberOfItems": int(item["count"]),
+                "numberOfItems": int(item["count"]),
             }
             for item in collection_items
         ]
