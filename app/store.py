@@ -83,6 +83,16 @@ class SubjectBackfillResult:
     error_examples: list[dict[str, str]] | None = None
 
 
+@dataclass
+class SubjectAuthorityBackfillResult:
+    processed_publications: int
+    indexed_authority_rows: int
+    next_cursor: str | None
+    has_more: bool
+    skipped_publications: int = 0
+    error_examples: list[dict[str, str]] | None = None
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -112,6 +122,7 @@ class PublicationRow(Base):
     published: Mapped[str | None] = mapped_column(String(64), nullable=True)
     identifier: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     subjects_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    subject_authorities_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     links_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     source: Mapped[str] = mapped_column(String(64), nullable=False, default="unknown")
     collection: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -279,6 +290,48 @@ class PublicationStore:
         return normalized_subjects
 
     @staticmethod
+    def _normalized_subject_authority_rows(normalized_subjects: list[dict[str, str]]) -> list[dict[str, str]]:
+        rows: list[dict[str, str]] = []
+        seen: set[tuple[str, str, str, str]] = set()
+        for item in normalized_subjects:
+            subject_slug = item.get("subject_slug")
+            subject_name = item.get("subject_name")
+            if not isinstance(subject_slug, str) or not subject_slug:
+                continue
+            if not isinstance(subject_name, str) or not subject_name:
+                continue
+            mappings: list[dict[str, str]] = []
+            lcc_mapping = resolve_lcc(subject_name)
+            if isinstance(lcc_mapping, dict):
+                mappings.append(lcc_mapping)
+            lcsh_mappings = resolve_lcsh(subject_name)
+            if isinstance(lcsh_mappings, list):
+                mappings.extend([m for m in lcsh_mappings if isinstance(m, dict)])
+            thema_mappings = resolve_thema(subject_name)
+            if isinstance(thema_mappings, list):
+                mappings.extend([m for m in thema_mappings if isinstance(m, dict)])
+            for mapping in mappings:
+                scheme = _clamp_index_text(mapping.get("scheme"), max_length=256)
+                term = _clamp_index_text(mapping.get("term"), max_length=512)
+                code = _clamp_index_text(mapping.get("code"), max_length=128) or ""
+                if not scheme or not term:
+                    continue
+                dedupe_key = (subject_slug, scheme, term, code)
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+                rows.append(
+                    {
+                        "subject_slug": subject_slug,
+                        "subject_name": subject_name,
+                        "scheme": scheme,
+                        "term": term,
+                        "code": code,
+                    }
+                )
+        return rows
+
+    @staticmethod
     def _replace_publication_subjects(
         session: Session,
         *,
@@ -404,6 +457,7 @@ class PublicationStore:
         storage_publication_id = self._storage_publication_id(repository_id, source_publication_id)
         normalized_subjects = self._normalized_subject_rows(pub.subjects)
         normalized_categories = self._normalized_category_rows(normalized_subjects)
+        normalized_authorities = self._normalized_subject_authority_rows(normalized_subjects)
         payload = {
             "publication_id": storage_publication_id,
             "repository_id": repository_id,
@@ -415,6 +469,7 @@ class PublicationStore:
             "published": pub.published,
             "identifier": pub.identifier,
             "subjects_json": json.dumps(pub.subjects, ensure_ascii=True),
+            "subject_authorities_json": json.dumps(normalized_authorities, ensure_ascii=True),
             "links_json": json.dumps(pub.links, ensure_ascii=True),
             "source": pub.source,
             "collection": pub.collection,
@@ -494,6 +549,7 @@ class PublicationStore:
                         subjects = raw_subjects if isinstance(raw_subjects, list) else []
                         normalized_subjects = self._normalized_subject_rows(subjects)
                         normalized_categories = self._normalized_category_rows(normalized_subjects)
+                        normalized_authorities = self._normalized_subject_authority_rows(normalized_subjects)
                         self._replace_publication_subjects(
                             session,
                             repository_id=repository_id,
@@ -505,6 +561,14 @@ class PublicationStore:
                             repository_id=repository_id,
                             publication_id=publication_id,
                             normalized_categories=normalized_categories,
+                        )
+                        session.execute(
+                            PublicationRow.__table__.update()
+                            .where(
+                                PublicationRow.repository_id == repository_id,
+                                PublicationRow.publication_id == publication_id,
+                            )
+                            .values(subject_authorities_json=json.dumps(normalized_authorities, ensure_ascii=True))
                         )
                         session.flush()
                     processed_publications += 1
@@ -522,6 +586,73 @@ class PublicationStore:
             return SubjectBackfillResult(
                 processed_publications=processed_publications,
                 indexed_subject_rows=indexed_subject_rows,
+                next_cursor=next_cursor,
+                has_more=has_more,
+                skipped_publications=skipped_publications,
+                error_examples=error_examples,
+            )
+
+    def backfill_publication_subject_authorities(
+        self,
+        *,
+        repository_id: str = "default",
+        batch_size: int = 500,
+        start_after: str | None = None,
+        offset: int | None = None,
+    ) -> SubjectAuthorityBackfillResult:
+        effective_batch_size = max(1, min(batch_size, 5000))
+        processed_publications = 0
+        indexed_authority_rows = 0
+        skipped_publications = 0
+        error_examples: list[dict[str, str]] = []
+
+        with self._session() as session:
+            selection = (
+                select(
+                    PublicationRow.publication_id,
+                    PublicationRow.subjects_json,
+                )
+                .where(PublicationRow.repository_id == repository_id)
+                .order_by(PublicationRow.publication_id.asc())
+            )
+            if start_after:
+                selection = selection.where(PublicationRow.publication_id > start_after)
+            if offset is not None and offset > 0:
+                selection = selection.offset(offset)
+            work_rows = session.execute(selection.limit(effective_batch_size + 1)).all()
+            has_more = len(work_rows) > effective_batch_size
+            work_rows = work_rows[:effective_batch_size]
+
+            next_cursor = work_rows[-1][0] if work_rows else None
+            for publication_id, subjects_json in work_rows:
+                try:
+                    raw_subjects = json.loads(subjects_json or "[]")
+                    if not isinstance(raw_subjects, list):
+                        raw_subjects = []
+                    normalized_subjects = self._normalized_subject_rows(raw_subjects)
+                    normalized_authorities = self._normalized_subject_authority_rows(normalized_subjects)
+                    session.execute(
+                        PublicationRow.__table__.update()
+                        .where(
+                            PublicationRow.repository_id == repository_id,
+                            PublicationRow.publication_id == publication_id,
+                        )
+                        .values(subject_authorities_json=json.dumps(normalized_authorities, ensure_ascii=True))
+                    )
+                    indexed_authority_rows += len(normalized_authorities)
+                    processed_publications += 1
+                except Exception as exc:
+                    skipped_publications += 1
+                    if len(error_examples) < 5:
+                        error_examples.append({"publication_id": publication_id, "error": str(exc)})
+
+            session.commit()
+            if not work_rows:
+                next_cursor = None
+                has_more = False
+            return SubjectAuthorityBackfillResult(
+                processed_publications=processed_publications,
+                indexed_authority_rows=indexed_authority_rows,
                 next_cursor=next_cursor,
                 has_more=has_more,
                 skipped_publications=skipped_publications,
@@ -1924,6 +2055,7 @@ class PublicationStore:
             published=row.published,
             identifier=row.identifier,
             subjects=json.loads(row.subjects_json or "[]"),
+            subject_authorities=json.loads(row.subject_authorities_json or "[]"),
             links=json.loads(row.links_json or "[]"),
             source=row.source,
             collection=row.collection,

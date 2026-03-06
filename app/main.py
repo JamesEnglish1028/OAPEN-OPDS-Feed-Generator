@@ -696,6 +696,47 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
 
     author = [{"name": name} for name in pub.authors] if pub.authors else []
     subject = [{"name": value} for value in pub.subjects] if pub.subjects else []
+    enriched_subjects = []
+    raw_subject_authorities = pub.subject_authorities if isinstance(pub.subject_authorities, list) else []
+    authorities_by_slug: dict[str, list[dict]] = {}
+    for row in raw_subject_authorities:
+        if not isinstance(row, dict):
+            continue
+        subject_slug = row.get("subject_slug")
+        subject_name = row.get("subject_name")
+        scheme = row.get("scheme")
+        term = row.get("term")
+        code = row.get("code")
+        if not isinstance(subject_slug, str) or not subject_slug:
+            continue
+        if not isinstance(subject_name, str) or not subject_name:
+            continue
+        if not isinstance(scheme, str) or not scheme:
+            continue
+        if not isinstance(term, str) or not term:
+            continue
+        authority = {"scheme": scheme, "term": term}
+        if isinstance(code, str) and code:
+            authority["code"] = code
+        authorities_by_slug.setdefault(subject_slug, []).append(authority)
+    seen_enriched_slugs: set[str] = set()
+    for row in raw_subject_authorities:
+        if not isinstance(row, dict):
+            continue
+        subject_slug = row.get("subject_slug")
+        subject_name = row.get("subject_name")
+        if not isinstance(subject_slug, str) or not subject_slug or subject_slug in seen_enriched_slugs:
+            continue
+        if not isinstance(subject_name, str) or not subject_name:
+            continue
+        enriched_subject = {"name": subject_name}
+        authorities = authorities_by_slug.get(subject_slug, [])
+        if authorities:
+            enriched_subject["authorities"] = authorities
+        enriched_subjects.append(enriched_subject)
+        seen_enriched_slugs.add(subject_slug)
+    if not enriched_subjects and subject:
+        enriched_subjects = [{"name": item["name"]} for item in subject]
 
     description = metadata_src.get("description")
     if not isinstance(description, str) or not description.strip():
@@ -711,6 +752,7 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
             "published": modified,
             "author": author,
             "subject": subject,
+            "subjects": enriched_subjects,
         }
     )
     if pub.language:
@@ -2417,11 +2459,20 @@ def admin_ui() -> str:
       const backfillButton = document.createElement("button");
       backfillButton.type = "button";
       backfillButton.className = "secondary";
-      backfillButton.textContent = "Reindex Classifications";
+      backfillButton.textContent = "Reindex Subjects";
       backfillButton.addEventListener("click", () => {
         backfillSubjects(repo.repository_id).catch((error) => show({ error: String(error) }));
       });
       repoDetailActions.appendChild(backfillButton);
+
+      const authorityBackfillButton = document.createElement("button");
+      authorityBackfillButton.type = "button";
+      authorityBackfillButton.className = "secondary";
+      authorityBackfillButton.textContent = "Reindex Subject Authorities";
+      authorityBackfillButton.addEventListener("click", () => {
+        backfillSubjectAuthorities(repo.repository_id).catch((error) => show({ error: String(error) }));
+      });
+      repoDetailActions.appendChild(authorityBackfillButton);
 
       if (!repo.isDefaultRepository) {
         const clearButton = document.createElement("button");
@@ -2546,6 +2597,33 @@ def admin_ui() -> str:
       show(data);
       if (response.ok) {
         updateSubjectBackfillCursor(repositoryId, data);
+        await refreshRepositoriesSilently(repositoryId);
+      }
+    }
+
+    async function backfillSubjectAuthorities(explicitRepositoryId) {
+      const repositoryId = resolveRepositoryId(explicitRepositoryId, repoSelect.value);
+      if (!repositoryId) {
+        show({ error: "Select a repository first." });
+        return;
+      }
+      const batchInput = window.prompt("Subject authority reindex batch size (1-5000):", "500");
+      if (batchInput === null) {
+        return;
+      }
+      const batchSize = Number(batchInput.trim() || "500");
+      if (!Number.isFinite(batchSize) || batchSize < 1 || batchSize > 5000) {
+        show({ error: "Batch size must be between 1 and 5000." });
+        return;
+      }
+      const response = await fetch("/repositories/" + encodeURIComponent(repositoryId) + "/reindex/subject-authorities", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batch_size: Math.floor(batchSize) }),
+      });
+      const data = await readJson(response);
+      show(data);
+      if (response.ok) {
         await refreshRepositoriesSilently(repositoryId);
       }
     }
@@ -3024,6 +3102,31 @@ def backfill_repository_subjects(repository_id: str, request: SubjectBackfillReq
         "repository_name": repository.name,
         "processed_publications": result.processed_publications,
         "indexed_subject_rows": result.indexed_subject_rows,
+        "skipped_publications": result.skipped_publications,
+        "error_examples": result.error_examples or [],
+        "next_cursor": result.next_cursor,
+        "has_more": result.has_more,
+        "batch_size": request.batch_size,
+        "total_publications": store.count(repository_id=repository_id),
+    }
+
+
+@app.post("/repositories/{repository_id}/backfill/subject-authorities")
+def backfill_repository_subject_authorities(repository_id: str, request: SubjectBackfillRequest) -> dict:
+    repository = _get_repository_or_404(repository_id)
+    result = store.backfill_publication_subject_authorities(
+        repository_id=repository_id,
+        batch_size=request.batch_size,
+        start_after=request.start_after,
+        offset=request.offset,
+    )
+    if result.processed_publications:
+        _invalidate_opds_cache(repository_id)
+    return {
+        "repository_id": repository_id,
+        "repository_name": repository.name,
+        "processed_publications": result.processed_publications,
+        "indexed_authority_rows": result.indexed_authority_rows,
         "skipped_publications": result.skipped_publications,
         "error_examples": result.error_examples or [],
         "next_cursor": result.next_cursor,
@@ -4961,6 +5064,11 @@ def classification_authority_resolve(
 @app.post("/repositories/{repository_id}/reindex/subjects")
 def reindex_repository_subjects(repository_id: str, request: SubjectBackfillRequest) -> dict:
     return backfill_repository_subjects(repository_id=repository_id, request=request)
+
+
+@app.post("/repositories/{repository_id}/reindex/subject-authorities")
+def reindex_repository_subject_authorities(repository_id: str, request: SubjectBackfillRequest) -> dict:
+    return backfill_repository_subject_authorities(repository_id=repository_id, request=request)
 
 
 @app.post("/harvest/run")

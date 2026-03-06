@@ -16,16 +16,15 @@ except (RuntimeError, ModuleNotFoundError) as exc:
 
 import app.main as main_module
 from app.main import app, store
-from app.store import PublicationStore
+from app.store import Base, PublicationStore
 
 
 client = TestClient(app)
 
 
 def _reset_store() -> None:
-    store.initialize()
-    store.clear()
-    store.clear_checkpoints()
+    Base.metadata.drop_all(store._engine)
+    Base.metadata.create_all(store._engine)
 
 
 def test_ingest_json_and_opds_pagination() -> None:
@@ -600,6 +599,49 @@ def test_publication_metadata_type_maps_chapter_records(tmp_path) -> None:
     assert publication.status_code == 200
     payload = publication.json()
     assert payload["metadata"]["@type"] == "http://schema.org/Chapter"
+
+
+def test_subject_authorities_backfill_emits_backward_compatible_enriched_subjects(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "subject_authority_case.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "publications": [
+                    {
+                        "id": "subject-authority-1",
+                        "title": "Subject Authority Demo",
+                        "subjects": ["Political Science"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+
+    backfill = client.post(
+        "/repositories/default/backfill/subject-authorities",
+        json={"batch_size": 100},
+    )
+    assert backfill.status_code == 200
+    backfill_payload = backfill.json()
+    assert backfill_payload["processed_publications"] >= 1
+
+    publication = client.get("/publications/subject-authority-1")
+    assert publication.status_code == 200
+    metadata = publication.json()["metadata"]
+    assert metadata["subject"] == [{"name": "Political Science"}]
+    assert isinstance(metadata.get("subjects"), list)
+    assert metadata["subjects"][0]["name"] == "Political Science"
+    authority_schemes = {
+        authority.get("scheme")
+        for authority in metadata["subjects"][0].get("authorities", [])
+        if isinstance(authority, dict)
+    }
+    assert "http://id.loc.gov" in authority_schemes or "http://id.loc.gov/authorities/subjects" in authority_schemes
 
 
 def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:
