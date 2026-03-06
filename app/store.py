@@ -194,31 +194,69 @@ class PublicationStore:
         self._ensure_publications_compat_columns()
 
     def _ensure_publications_compat_columns(self) -> None:
-        # Operational safety net for SQLite deployments where Alembic may fail
-        # but newer ORM code still expects recently-added columns.
-        if self._is_postgres:
-            return
         required_columns = {
-            "repository_id": "TEXT NOT NULL DEFAULT 'default'",
-            "source_publication_id": "TEXT",
-            "subject_authorities_json": "TEXT NOT NULL DEFAULT '[]'",
-            "collection": "TEXT",
-            "collection_slug": "TEXT",
-            "series_name": "TEXT",
-            "series_slug": "TEXT",
-            "series_position": "INTEGER",
-            "publisher_slug": "TEXT",
-            "publication_year": "INTEGER",
+            "repository_id": {
+                "sqlite": "TEXT NOT NULL DEFAULT 'default'",
+                "postgres": "VARCHAR(128) NOT NULL DEFAULT 'default'",
+            },
+            "source_publication_id": {
+                "sqlite": "TEXT",
+                "postgres": "VARCHAR(512)",
+            },
+            "subject_authorities_json": {
+                "sqlite": "TEXT NOT NULL DEFAULT '[]'",
+                "postgres": "TEXT NOT NULL DEFAULT '[]'",
+            },
+            "collection": {
+                "sqlite": "TEXT",
+                "postgres": "VARCHAR(512)",
+            },
+            "collection_slug": {
+                "sqlite": "TEXT",
+                "postgres": "VARCHAR(512)",
+            },
+            "series_name": {
+                "sqlite": "TEXT",
+                "postgres": "VARCHAR(512)",
+            },
+            "series_slug": {
+                "sqlite": "TEXT",
+                "postgres": "VARCHAR(512)",
+            },
+            "series_position": {
+                "sqlite": "INTEGER",
+                "postgres": "INTEGER",
+            },
+            "publisher_slug": {
+                "sqlite": "TEXT",
+                "postgres": "VARCHAR(512)",
+            },
+            "publication_year": {
+                "sqlite": "INTEGER",
+                "postgres": "INTEGER",
+            },
         }
         with self._session() as session:
+            if self._is_postgres:
+                for column_name, ddl_variants in required_columns.items():
+                    column_ddl = ddl_variants["postgres"]
+                    session.execute(
+                        sqla_text(
+                            f"ALTER TABLE publications ADD COLUMN IF NOT EXISTS {column_name} {column_ddl}"
+                        )
+                    )
+                session.commit()
+                return
+
             existing_columns = {
                 str(row[1])
                 for row in session.execute(sqla_text("PRAGMA table_info(publications)")).all()
                 if len(row) > 1
             }
-            for column_name, column_ddl in required_columns.items():
+            for column_name, ddl_variants in required_columns.items():
                 if column_name in existing_columns:
                     continue
+                column_ddl = ddl_variants["sqlite"]
                 session.execute(sqla_text(f"ALTER TABLE publications ADD COLUMN {column_name} {column_ddl}"))
             session.commit()
 
