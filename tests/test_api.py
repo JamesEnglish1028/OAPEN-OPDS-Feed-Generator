@@ -6,6 +6,7 @@ os.environ["DATABASE_URL"] = "sqlite:///./test_oapen_opds.db"
 os.environ["SCHEDULER_ENABLED"] = "false"
 
 import pytest
+from sqlalchemy import text as sqla_text
 
 try:
     from fastapi.testclient import TestClient
@@ -104,6 +105,46 @@ def test_persistence_across_store_instances() -> None:
     persisted = PublicationStore("sqlite:///./test_oapen_opds.db")
     persisted.initialize()
     assert persisted.count() == 3
+
+
+def test_opds_feed_survives_legacy_publications_schema_and_auto_repairs_columns() -> None:
+    _reset_store()
+    with store._engine.begin() as conn:
+        conn.execute(sqla_text("DROP TABLE publications"))
+        conn.execute(
+            sqla_text(
+                """
+                CREATE TABLE publications (
+                    publication_id VARCHAR(512) PRIMARY KEY,
+                    title VARCHAR(2000) NOT NULL,
+                    authors_json TEXT NOT NULL DEFAULT '[]',
+                    language VARCHAR(64),
+                    publisher VARCHAR(512),
+                    published VARCHAR(64),
+                    identifier VARCHAR(1024),
+                    subjects_json TEXT NOT NULL DEFAULT '[]',
+                    links_json TEXT NOT NULL DEFAULT '[]',
+                    source VARCHAR(64) NOT NULL DEFAULT 'unknown',
+                    raw_json TEXT NOT NULL DEFAULT '{}',
+                    updated_at DATETIME,
+                    created_at DATETIME
+                )
+                """
+            )
+        )
+
+    # Regression guard: initialize() should patch legacy schemas so OPDS queries
+    # do not fail with missing-column 500s.
+    store.initialize()
+
+    with store._engine.connect() as conn:
+        columns = {str(row[1]) for row in conn.execute(sqla_text("PRAGMA table_info(publications)")).all()}
+    assert "repository_id" in columns
+    assert "subject_authorities_json" in columns
+    assert "publication_year" in columns
+
+    feed = client.get("/opds?page=1&page_size=10")
+    assert feed.status_code == 200
 
 
 def test_incremental_checkpoint_and_palace_validation(monkeypatch) -> None:
