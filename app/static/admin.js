@@ -1,6 +1,8 @@
     const viewPanels = Array.from(document.querySelectorAll(".view-panel"));
     const viewButtons = Array.from(document.querySelectorAll("[data-view-button]"));
+    const DEFAULT_REPOSITORY_ID = "default";
     const repoList = document.getElementById("repo-list");
+    const repoForm = document.getElementById("repo-form");
     const repoSelect = document.getElementById("harvest-repo");
     const repoSummary = document.getElementById("repo-summary");
     const repoDetail = document.getElementById("repo-detail");
@@ -14,9 +16,23 @@
     const maintenanceClearData = document.getElementById("maintenance-clear-data");
     const maintenanceDeleteRepository = document.getElementById("maintenance-delete-repository");
     const saveRepoButton = document.getElementById("save-repo");
+    const refreshReposButton = document.getElementById("refresh-repos");
+    const refreshReposManageButton = document.getElementById("refresh-repos-manage");
     const repoIdInput = document.getElementById("repo-id");
     const repoNameInput = document.getElementById("repo-name");
+    const repoTypeInput = document.getElementById("repo-type");
     const repoConfigInput = document.getElementById("repo-config");
+    const repoActiveInput = document.getElementById("repo-active");
+    const harvestForm = document.getElementById("harvest-form");
+    const harvestUrlInput = document.getElementById("harvest-url");
+    const harvestMaxPagesInput = document.getElementById("harvest-max-pages");
+    const harvestMaxRecordsInput = document.getElementById("harvest-max-records");
+    const harvestTimeoutInput = document.getElementById("harvest-timeout");
+    const harvestFollowNextInput = document.getElementById("harvest-follow-next");
+    const harvestIncrementalInput = document.getElementById("harvest-incremental");
+    const directoryModeSplitInput = document.getElementById("directory-mode-split");
+    const directoryModeSingleInput = document.getElementById("directory-mode-single");
+    const directoryImportSummary = document.getElementById("directory-import-summary");
     const directoryList = document.getElementById("directory-list");
     const directorySelectAll = document.getElementById("directory-select-all");
     const startHarvestButton = document.getElementById("start-harvest");
@@ -163,33 +179,28 @@
     }
 
     function updateDirectoryImportSummary() {
-      const summary = document.getElementById("directory-import-summary");
       const selectedEntries = getCheckedDirectoryEntries();
       const selectedCount = selectedEntries.length;
       const mode = currentDirectoryImportMode();
       const targetRepository = repoSelect.value || "(none)";
       if (selectedCount === 0) {
-        summary.textContent = "Select one or more directories to import.";
+        directoryImportSummary.textContent = "Select one or more directories to import.";
         return;
       }
       if (mode === "split-repositories") {
-        summary.textContent = "This will create " + selectedCount + " repository" + (selectedCount === 1 ? "" : "ies") + " from the selected directories.";
+        directoryImportSummary.textContent = "This will create " + selectedCount + " repository" + (selectedCount === 1 ? "" : "ies") + " from the selected directories.";
         return;
       }
-      summary.textContent = "This will import " + selectedCount + " directories into repository '" + targetRepository + "' as collections.";
+      directoryImportSummary.textContent = "This will import " + selectedCount + " directories into repository '" + targetRepository + "' as collections.";
     }
 
     function updateHarvestActionState() {
-      const url = document.getElementById("harvest-url").value.trim();
+      const url = harvestUrlInput.value.trim();
       const hasUrl = Boolean(url);
       const hasRepository = Boolean(repoSelect.value);
       const selectedCount = getCheckedDirectoryEntries().length;
       const mode = currentDirectoryImportMode();
-
-      const manageRefreshButton = document.getElementById("refresh-repos-manage");
-      if (manageRefreshButton) {
-        manageRefreshButton.disabled = harvestBusy;
-      }
+      refreshReposManageButton.disabled = harvestBusy;
       fetchDirectoriesButton.disabled = harvestBusy || !hasUrl;
       loadCheckpointsButton.disabled = harvestBusy || !hasRepository;
       directorySelectAll.disabled = directoryEntries.length === 0;
@@ -319,12 +330,12 @@
       const nextConfig = { url: entry.href };
       const title = typeof entry.title === "string" ? entry.title.trim() : "";
       const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-      document.getElementById("repo-config").value = JSON.stringify(nextConfig, null, 2);
+      repoConfigInput.value = JSON.stringify(nextConfig, null, 2);
       if (slug) {
-        document.getElementById("repo-id").value = slug;
+        repoIdInput.value = slug;
       }
       if (title) {
-        document.getElementById("repo-name").value = title;
+        repoNameInput.value = title;
       }
     }
 
@@ -401,7 +412,7 @@
       maintenanceSelectedName.textContent = repo.name + " (" + repo.repository_id + ")";
       maintenanceReindexSubjects.disabled = false;
       maintenanceReindexAuthorities.disabled = false;
-      const isDefaultRepo = repo.repository_id === "default";
+      const isDefaultRepo = repo.repository_id === DEFAULT_REPOSITORY_ID;
       maintenanceClearData.disabled = isDefaultRepo;
       maintenanceDeleteRepository.disabled = isDefaultRepo;
     }
@@ -561,12 +572,12 @@
     }
 
     async function clearRepositoryData(explicitRepositoryId) {
-      const repositoryId = resolveRepositoryId(explicitRepositoryId, document.getElementById("repo-id").value);
+      const repositoryId = resolveRepositoryId(explicitRepositoryId, repoIdInput.value);
       if (!repositoryId) {
         show({ error: "Select or enter a repository first." });
         return;
       }
-      if (repositoryId === "default") {
+      if (repositoryId === DEFAULT_REPOSITORY_ID) {
         show({ error: "The default repository cannot be cleared." });
         return;
       }
@@ -586,11 +597,11 @@
     }
 
     function loadRepositoryIntoForm(repo) {
-      document.getElementById("repo-id").value = repo.repository_id;
-      document.getElementById("repo-name").value = repo.name;
-      document.getElementById("repo-type").value = repo.source_type;
-      document.getElementById("repo-config").value = JSON.stringify(repo.config || {}, null, 2);
-      document.getElementById("repo-active").checked = Boolean(repo.is_active);
+      repoIdInput.value = repo.repository_id;
+      repoNameInput.value = repo.name;
+      repoTypeInput.value = repo.source_type;
+      repoConfigInput.value = JSON.stringify(repo.config || {}, null, 2);
+      repoActiveInput.checked = Boolean(repo.is_active);
       updateRepoFormButtonState();
     }
 
@@ -616,12 +627,12 @@
 
     async function saveRepository(event) {
       event.preventDefault();
-      const repositoryId = document.getElementById("repo-id").value.trim();
+      const repositoryId = repoIdInput.value.trim();
       const body = {
-        source_type: document.getElementById("repo-type").value,
-        name: document.getElementById("repo-name").value.trim(),
-        config: normalizeConfigText(document.getElementById("repo-config").value),
-        is_active: document.getElementById("repo-active").checked,
+        source_type: repoTypeInput.value,
+        name: repoNameInput.value.trim(),
+        config: normalizeConfigText(repoConfigInput.value),
+        is_active: repoActiveInput.checked,
       };
       const response = await fetch("/repositories/" + encodeURIComponent(repositoryId), {
         method: "PUT",
@@ -637,12 +648,12 @@
     }
 
     async function deleteRepository(explicitRepositoryId) {
-      const repositoryId = resolveRepositoryId(explicitRepositoryId, document.getElementById("repo-id").value);
+      const repositoryId = resolveRepositoryId(explicitRepositoryId, repoIdInput.value);
       if (!repositoryId) {
         show({ error: "Select or enter a repository first." });
         return;
       }
-      if (repositoryId === "default") {
+      if (repositoryId === DEFAULT_REPOSITORY_ID) {
         show({ error: "The default repository cannot be deleted." });
         return;
       }
@@ -660,9 +671,9 @@
         if (selectedRepository && selectedRepository.repository_id === repositoryId) {
           renderRepositoryDetail(null);
         }
-        document.getElementById("repo-form").reset();
-        document.getElementById("repo-config").value = "{}";
-        document.getElementById("repo-active").checked = true;
+        repoForm.reset();
+        repoConfigInput.value = "{}";
+        repoActiveInput.checked = true;
         updateRepoFormButtonState();
         await refreshRepositoriesSilently();
       }
@@ -674,13 +685,13 @@
       try {
         const repositoryId = repoSelect.value;
         const body = {
-          url: document.getElementById("harvest-url").value.trim(),
-          follow_next: document.getElementById("harvest-follow-next").checked,
-          incremental: document.getElementById("harvest-incremental").checked,
-          timeout_seconds: Number(document.getElementById("harvest-timeout").value) || 120,
+          url: harvestUrlInput.value.trim(),
+          follow_next: harvestFollowNextInput.checked,
+          incremental: harvestIncrementalInput.checked,
+          timeout_seconds: Number(harvestTimeoutInput.value) || 120,
         };
-        const maxPages = document.getElementById("harvest-max-pages").value.trim();
-        const maxRecords = document.getElementById("harvest-max-records").value.trim();
+        const maxPages = harvestMaxPagesInput.value.trim();
+        const maxRecords = harvestMaxRecordsInput.value.trim();
         if (maxPages) body.max_pages = Number(maxPages);
         if (maxRecords) body.max_records = Number(maxRecords);
 
@@ -701,14 +712,14 @@
     }
 
     async function fetchDirectories() {
-      const url = document.getElementById("harvest-url").value.trim();
+      const url = harvestUrlInput.value.trim();
       if (!url) {
         show({ error: "Enter a remote feed URL first." });
         return;
       }
       setHarvestBusy(true, "Fetching");
       try {
-        const timeoutSeconds = Number(document.getElementById("harvest-timeout").value) || 120;
+        const timeoutSeconds = Number(harvestTimeoutInput.value) || 120;
         const response = await fetch("/ingest/opds-json/directories", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -738,18 +749,18 @@
       try {
         const mode = modeOverride || currentDirectoryImportMode();
         const payload = {
-          root_url: document.getElementById("harvest-url").value.trim(),
+          root_url: harvestUrlInput.value.trim(),
           directories: selectedEntries.map((entry) => ({
             title: entry.title || entry.href,
             href: entry.href,
           })),
           mode: mode,
-          follow_next: document.getElementById("harvest-follow-next").checked,
-          incremental: document.getElementById("harvest-incremental").checked,
-          timeout_seconds: Number(document.getElementById("harvest-timeout").value) || 120,
+          follow_next: harvestFollowNextInput.checked,
+          incremental: harvestIncrementalInput.checked,
+          timeout_seconds: Number(harvestTimeoutInput.value) || 120,
         };
-        const maxPages = document.getElementById("harvest-max-pages").value.trim();
-        const maxRecords = document.getElementById("harvest-max-records").value.trim();
+        const maxPages = harvestMaxPagesInput.value.trim();
+        const maxRecords = harvestMaxRecordsInput.value.trim();
         if (maxPages) payload.max_pages = Number(maxPages);
         if (maxRecords) payload.max_records = Number(maxRecords);
         if (mode === "single-repository-collections") {
@@ -790,7 +801,7 @@
       }
     }
 
-    document.getElementById("repo-form").addEventListener("submit", (event) => {
+    repoForm.addEventListener("submit", (event) => {
       saveRepository(event).catch((error) => show({ error: String(error) }));
     });
     for (const button of viewButtons) {
@@ -810,13 +821,13 @@
     repoConfigInput.addEventListener("input", () => {
       updateRepoFormButtonState();
     });
-    document.getElementById("harvest-form").addEventListener("submit", (event) => {
+    harvestForm.addEventListener("submit", (event) => {
       runHarvest(event).catch((error) => show({ error: String(error) }));
     });
-    document.getElementById("refresh-repos").addEventListener("click", () => {
+    refreshReposButton.addEventListener("click", () => {
       loadRepositories().catch((error) => show({ error: String(error) }));
     });
-    document.getElementById("refresh-repos-manage").addEventListener("click", () => {
+    refreshReposManageButton.addEventListener("click", () => {
       loadRepositories().catch((error) => show({ error: String(error) }));
     });
     maintenanceReindexSubjects.addEventListener("click", () => {
@@ -847,7 +858,7 @@
       }
       deleteRepository(selectedRepository.repository_id).catch((error) => show({ error: String(error) }));
     });
-    document.getElementById("harvest-url").addEventListener("input", () => {
+    harvestUrlInput.addEventListener("input", () => {
       updateHarvestActionState();
     });
     document.getElementById("load-checkpoints").addEventListener("click", () => {
@@ -862,10 +873,10 @@
     document.getElementById("import-into-repository").addEventListener("click", () => {
       importSelectedDirectories("single-repository-collections").catch((error) => show({ error: String(error) }));
     });
-    document.getElementById("directory-mode-split").addEventListener("change", () => {
+    directoryModeSplitInput.addEventListener("change", () => {
       syncDirectoryImportModeUi();
     });
-    document.getElementById("directory-mode-single").addEventListener("change", () => {
+    directoryModeSingleInput.addEventListener("change", () => {
       syncDirectoryImportModeUi();
     });
     repoSelect.addEventListener("change", () => {

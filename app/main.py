@@ -6,6 +6,7 @@ import re
 import threading
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from urllib.parse import urlencode, urljoin, urlparse
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -38,7 +39,8 @@ SUBCLASSIFICATION_FACET_LINK_LIMIT = max(1, int(os.getenv("OPDS_SUBCLASSIFICATIO
 ROOT_NAV_GROUP_LINK_LIMIT = max(1, int(os.getenv("OPDS_ROOT_NAV_GROUP_LINK_LIMIT", "3")))
 
 app = FastAPI(title="OAPEN OPDS Feed Generator", version="0.2.0")
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 logger = logging.getLogger(__name__)
 store = PublicationStore(os.getenv("DATABASE_URL", "sqlite:///./oapen_opds.db"))
 opds_cache = OpdsCache()
@@ -1633,7 +1635,7 @@ def _repository_source_domain(repository: RepositoryConfig, checkpoints) -> str 
 
 @app.get("/admin")
 def admin_ui() -> FileResponse:
-    return FileResponse("app/static/admin.html")
+    return FileResponse(STATIC_DIR / "admin.html")
 
 
 @app.get("/health")

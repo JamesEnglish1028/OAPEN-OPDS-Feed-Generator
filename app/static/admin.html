@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OPDS Admin</title>
   <link rel="stylesheet" href="/static/admin.css">
-
 </head>
 <body>
   <div class="wrap">
@@ -74,7 +73,7 @@
         <div class="card">
           <h2>Known Repositories</h2>
           <p id="repo-summary" class="summary">Loading repositories...</p>
-          <div class="actions" style="margin-bottom:10px;">
+          <div class="actions mb-10">
             <button type="button" class="ghost" id="refresh-repos-manage">Refresh Repository List</button>
           </div>
           <p class="hint">Select a repository to inspect details, load it into the form, and route into ingest/maintenance workflows.</p>
@@ -129,18 +128,18 @@
               <button type="button" class="ghost" id="fetch-directories">Fetch Directories</button>
               <button type="button" class="ghost" id="load-checkpoints">Load Checkpoints</button>
             </div>
-            <p id="harvest-action-hint" class="hint" style="margin: 6px 0 0;">Enter a feed URL to begin.</p>
-            <div style="margin-top:14px;">
+            <p id="harvest-action-hint" class="hint hint-tight">Enter a feed URL to begin.</p>
+            <div class="mt-14">
               <label>Import Strategy</label>
               <label class="check"><input id="directory-mode-split" type="radio" name="directory_import_mode" value="split-repositories" checked> Create one repository per selected directory</label>
               <label class="check"><input id="directory-mode-single" type="radio" name="directory_import_mode" value="single-repository-collections"> Import selected directories into the selected repository as collections</label>
-              <p id="directory-import-summary" class="hint" style="margin: 6px 0 0;">Select directories to see what will happen.</p>
+              <p id="directory-import-summary" class="hint hint-tight">Select directories to see what will happen.</p>
             </div>
-            <div style="margin-top:10px;">
+            <div class="mt-10">
               <label class="check"><input id="directory-select-all" type="checkbox"> Select all fetched directories</label>
-              <div id="directory-list" class="list" style="max-height:220px;"></div>
+              <div id="directory-list" class="list list-compact"></div>
             </div>
-            <div class="actions" style="margin-top:10px;">
+            <div class="actions mt-10">
               <button type="button" id="import-as-repositories">Create Repositories</button>
               <button type="button" id="import-into-repository" class="secondary">Import Into Selected Repository</button>
             </div>
@@ -198,6 +197,5 @@
     </section>
   </div>
   <script src="/static/admin.js" defer></script>
-
 </body>
 </html>
