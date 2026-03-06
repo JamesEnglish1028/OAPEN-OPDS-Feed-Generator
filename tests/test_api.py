@@ -1,6 +1,7 @@
 import os
 import json
 from pathlib import Path
+from urllib.parse import urlparse
 
 os.environ["DATABASE_URL"] = "sqlite:///./test_oapen_opds.db"
 os.environ["SCHEDULER_ENABLED"] = "false"
@@ -317,6 +318,45 @@ def test_collection_and_language_subfeeds() -> None:
 
     classification_feed = client.get("/opds/classifications?page=1&page_size=10")
     assert classification_feed.status_code == 200
+
+
+def test_classification_subject_navigation_links_match_non_empty_subject_feeds(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "classification_nav_fixture.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "publications": [
+                    {"id": "class-nav-1", "title": "Class Nav 1", "subjects": ["Political Science"]},
+                    {"id": "class-nav-2", "title": "Class Nav 2", "subjects": ["Political Science"]},
+                    {"id": "class-nav-3", "title": "Class Nav 3", "subjects": ["Political Science"]},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+
+    classifications = client.get("/opds/classifications?page=1&page_size=10")
+    assert classifications.status_code == 200
+    navigation = classifications.json().get("navigation", [])
+    assert navigation
+    classification_slug = navigation[0]["href"].split("/opds/classifications/")[-1]
+
+    subject_index = client.get(f"/opds/classifications/{classification_slug}/subjects?page=1&page_size=25")
+    assert subject_index.status_code == 200
+    subject_nav = subject_index.json().get("navigation", [])
+    assert subject_nav
+
+    first_subject = subject_nav[0]
+    expected_count = int(first_subject.get("properties", {}).get("numberOfItems", 0))
+    subject_path = urlparse(first_subject["href"]).path
+    subject_feed = client.get(subject_path)
+    assert subject_feed.status_code == 200
+    payload = subject_feed.json()
+    assert payload["metadata"]["numberOfItems"] == expected_count
+    assert len(payload["publications"]) >= 1
 
 
 def test_opds_search_endpoint() -> None:

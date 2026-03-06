@@ -1618,6 +1618,64 @@ class PublicationStore:
             rows = session.scalars(statement).all()
             return total, [self._to_publication(row) for row in rows]
 
+    def page_by_subject_slug_for_category(
+        self,
+        *,
+        subject_slug: str,
+        category_slug: str,
+        page: int,
+        page_size: int,
+        repository_id: str = "default",
+    ) -> tuple[int, list[NormalizedPublication]]:
+        offset = (page - 1) * page_size
+        with self._session() as session:
+            total = int(
+                session.scalar(
+                    select(sqla_func.count(sqla_func.distinct(PublicationSubjectRow.publication_id)))
+                    .select_from(PublicationSubjectRow)
+                    .join(
+                        PublicationSubjectCategoryRow,
+                        and_(
+                            PublicationSubjectCategoryRow.publication_id == PublicationSubjectRow.publication_id,
+                            PublicationSubjectCategoryRow.repository_id == PublicationSubjectRow.repository_id,
+                        ),
+                    )
+                    .where(
+                        PublicationSubjectRow.repository_id == repository_id,
+                        PublicationSubjectRow.subject_slug == subject_slug,
+                        PublicationSubjectCategoryRow.category_slug == category_slug,
+                    )
+                )
+                or 0
+            )
+            statement = (
+                select(PublicationRow)
+                .join(
+                    PublicationSubjectRow,
+                    and_(
+                        PublicationSubjectRow.publication_id == PublicationRow.publication_id,
+                        PublicationSubjectRow.repository_id == PublicationRow.repository_id,
+                    ),
+                )
+                .join(
+                    PublicationSubjectCategoryRow,
+                    and_(
+                        PublicationSubjectCategoryRow.publication_id == PublicationRow.publication_id,
+                        PublicationSubjectCategoryRow.repository_id == PublicationRow.repository_id,
+                    ),
+                )
+                .where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationSubjectRow.subject_slug == subject_slug,
+                    PublicationSubjectCategoryRow.category_slug == category_slug,
+                )
+                .order_by(PublicationRow.source_publication_id.asc(), PublicationRow.publication_id.asc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            rows = session.scalars(statement).all()
+            return total, [self._to_publication(row) for row in rows]
+
     def page_by_subject_slug_and_publication_year(
         self,
         subject_slug: str,
@@ -1660,6 +1718,74 @@ class PublicationStore:
                     PublicationRow.repository_id == repository_id,
                     PublicationRow.publication_year == year,
                     PublicationSubjectRow.subject_slug == subject_slug,
+                )
+                .order_by(PublicationRow.source_publication_id.asc(), PublicationRow.publication_id.asc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            rows = session.scalars(statement).all()
+            return total, [self._to_publication(row) for row in rows]
+
+    def page_by_subject_slug_and_category_and_publication_year(
+        self,
+        *,
+        subject_slug: str,
+        category_slug: str,
+        year: int,
+        page: int,
+        page_size: int,
+        repository_id: str = "default",
+    ) -> tuple[int, list[NormalizedPublication]]:
+        offset = (page - 1) * page_size
+        with self._session() as session:
+            total = int(
+                session.scalar(
+                    select(sqla_func.count(sqla_func.distinct(PublicationSubjectRow.publication_id)))
+                    .select_from(PublicationSubjectRow)
+                    .join(
+                        PublicationRow,
+                        and_(
+                            PublicationRow.publication_id == PublicationSubjectRow.publication_id,
+                            PublicationRow.repository_id == PublicationSubjectRow.repository_id,
+                        ),
+                    )
+                    .join(
+                        PublicationSubjectCategoryRow,
+                        and_(
+                            PublicationSubjectCategoryRow.publication_id == PublicationSubjectRow.publication_id,
+                            PublicationSubjectCategoryRow.repository_id == PublicationSubjectRow.repository_id,
+                        ),
+                    )
+                    .where(
+                        PublicationSubjectRow.repository_id == repository_id,
+                        PublicationSubjectRow.subject_slug == subject_slug,
+                        PublicationSubjectCategoryRow.category_slug == category_slug,
+                        PublicationRow.publication_year == year,
+                    )
+                )
+                or 0
+            )
+            statement = (
+                select(PublicationRow)
+                .join(
+                    PublicationSubjectRow,
+                    and_(
+                        PublicationSubjectRow.publication_id == PublicationRow.publication_id,
+                        PublicationSubjectRow.repository_id == PublicationRow.repository_id,
+                    ),
+                )
+                .join(
+                    PublicationSubjectCategoryRow,
+                    and_(
+                        PublicationSubjectCategoryRow.publication_id == PublicationRow.publication_id,
+                        PublicationSubjectCategoryRow.repository_id == PublicationRow.repository_id,
+                    ),
+                )
+                .where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.publication_year == year,
+                    PublicationSubjectRow.subject_slug == subject_slug,
+                    PublicationSubjectCategoryRow.category_slug == category_slug,
                 )
                 .order_by(PublicationRow.source_publication_id.asc(), PublicationRow.publication_id.asc())
                 .offset(offset)

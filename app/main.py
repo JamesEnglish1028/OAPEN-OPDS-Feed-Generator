@@ -2892,8 +2892,9 @@ def opds_subclassification_feed(
     category_name = str(category_entry["name"])
 
     def build_response() -> dict:
-        total, subset = store.page_by_subject_slug(
+        total, subset = store.page_by_subject_slug_for_category(
             subject_slug=subject_slug,
+            category_slug=classification_slug,
             page=page,
             page_size=page_size,
             repository_id=DEFAULT_REPOSITORY_ID,
@@ -2951,8 +2952,9 @@ def opds_subclassification_feed_repository(
     category_name = str(category_entry["name"])
 
     def build_response() -> dict:
-        total, subset = store.page_by_subject_slug(
+        total, subset = store.page_by_subject_slug_for_category(
             subject_slug=subject_slug,
+            category_slug=classification_slug,
             page=page,
             page_size=page_size,
             repository_id=repository_id,
@@ -3277,8 +3279,9 @@ def opds_year_subclassification_feed(
     category_name = str(category_entry["name"])
 
     def build_response() -> dict:
-        total, subset = store.page_by_subject_slug_and_publication_year(
+        total, subset = store.page_by_subject_slug_and_category_and_publication_year(
             subject_slug=subject_slug,
+            category_slug=classification_slug,
             year=year,
             page=page,
             page_size=page_size,
@@ -3343,8 +3346,9 @@ def opds_year_subclassification_feed_repository(
     category_name = str(category_entry["name"])
 
     def build_response() -> dict:
-        total, subset = store.page_by_subject_slug_and_publication_year(
+        total, subset = store.page_by_subject_slug_and_category_and_publication_year(
             subject_slug=subject_slug,
+            category_slug=classification_slug,
             year=year,
             page=page,
             page_size=page_size,
