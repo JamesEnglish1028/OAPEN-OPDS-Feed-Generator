@@ -10,3 +10,4 @@ apscheduler==3.10.4
 ijson==3.3.0
 httpx==0.28.1
 redis==5.2.1
+orcid==1.0.3

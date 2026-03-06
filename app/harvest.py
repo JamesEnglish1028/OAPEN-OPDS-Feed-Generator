@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import urljoin
 
+from app.orcid_enrichment import enrich_publication_authors
 from app.sources import extract_json_records, load_json_payload_from_url, load_oai_dc_records
 from app.store import HarvestCheckpoint, PublicationStore
 from app.transform import normalize_json_record, normalize_oai_record
@@ -36,7 +37,7 @@ def _set_repository_on_publication(publication, repository_id: str):
     publication.repository_id = repository_id
     if not publication.source_publication_id:
         publication.source_publication_id = publication.publication_id
-    return publication
+    return enrich_publication_authors(publication)
 
 
 def _extract_opds_next_url(payload: object, current_url: str) -> str | None:

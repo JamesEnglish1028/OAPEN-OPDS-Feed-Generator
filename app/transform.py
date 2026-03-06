@@ -291,6 +291,47 @@ def _extract_name_list(value: Any) -> list[str]:
     return names
 
 
+def _extract_author_entries(value: Any) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for item in _as_list(value):
+        if isinstance(item, str):
+            candidate = item.strip()
+            if candidate:
+                entries.append({"name": candidate})
+            continue
+        if not isinstance(item, dict):
+            continue
+        candidate = _first_str(
+            item.get("name"),
+            item.get("label"),
+            item.get("title"),
+            item.get("creator"),
+        )
+        if not candidate:
+            continue
+        entry = {"name": candidate}
+        uri = _first_str(item.get("uri"), item.get("id"))
+        if isinstance(uri, str) and uri.strip():
+            entry["uri"] = uri.strip()
+        orcid = _first_str(item.get("orcid"), item.get("orcid_id"), item.get("orcid-id"))
+        if isinstance(orcid, str) and orcid.strip():
+            orcid_value = orcid.strip()
+            if orcid_value.lower().startswith("http://") or orcid_value.lower().startswith("https://"):
+                entry["uri"] = orcid_value
+            else:
+                entry["uri"] = f"https://orcid.org/{orcid_value}"
+        entries.append(entry)
+    deduped: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in entries:
+        key = (entry.get("name", "").casefold(), entry.get("uri", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(entry)
+    return deduped
+
+
 def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
     metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
     identifier = _first_str(
@@ -312,13 +353,18 @@ def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
 
     author_field = raw.get("authors") or raw.get("author") or raw.get("creators") or metadata.get("author")
     editor_field = metadata.get("editor")
+    authors_enriched = _extract_author_entries(author_field)
     authors = _extract_name_list(author_field)
     if not authors:
         authors = _extract_name_list(editor_field)
+        if not authors_enriched:
+            authors_enriched = _extract_author_entries(editor_field)
     if not authors:
         creator_nodes = raw.get("creator")
         if isinstance(creator_nodes, list):
             authors = [str(v.get("name", "")).strip() for v in creator_nodes if isinstance(v, dict) and str(v.get("name", "")).strip()]
+            if not authors_enriched:
+                authors_enriched = _extract_author_entries(creator_nodes)
 
     subjects = _extract_name_list(raw.get("subjects") or raw.get("keywords") or metadata.get("subject"))
     language = first_valid_language(raw.get("language"), raw.get("lang"), metadata.get("language"))
@@ -377,6 +423,7 @@ def normalize_json_record(raw: dict[str, Any]) -> NormalizedPublication | None:
         publication_id=identifier,
         title=title,
         authors=authors,
+        authors_enriched=authors_enriched,
         language=language,
         publisher=publisher_value,
         published=published,
@@ -420,6 +467,7 @@ def normalize_oai_record(fields: dict[str, list[str]]) -> NormalizedPublication 
         publication_id=identifier,
         title=title,
         authors=[v for v in fields.get("creator", []) if v],
+        authors_enriched=[{"name": v} for v in fields.get("creator", []) if v],
         language=first_valid_language(fields.get("language", [])),
         publisher=_first_str(*fields.get("publisher", [])),
         published=_first_str(*fields.get("date", []), *fields.get("datestamp", [])),

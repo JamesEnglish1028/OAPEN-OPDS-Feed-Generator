@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from app.cache import OpdsCache
 from app.db_migrations import run_migrations
 from app.harvest import run_incremental_for_all_checkpoints
+from app.orcid_enrichment import enrich_publication_authors
 from app.scheduler import IncrementalHarvestScheduler
 from app.sources import extract_json_records, iter_json_records, iter_json_records_from_url, load_json_payload_from_url, load_oai_dc_records
 from app.store import IngestResult, PublicationStore, RepositoryConfig
@@ -243,7 +244,7 @@ def _set_repository_on_publication(publication, repository_id: str):
     publication.repository_id = repository_id
     if not publication.source_publication_id:
         publication.source_publication_id = publication.publication_id
-    return publication
+    return enrich_publication_authors(publication)
 
 
 def _maybe_invalidate_opds_cache_during_ingest(
@@ -707,7 +708,21 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
         if isinstance(item, dict):
             accessibility.append(item)
 
-    author = [{"name": name} for name in pub.authors] if pub.authors else []
+    author: list[dict[str, str]] = []
+    if isinstance(pub.authors_enriched, list) and pub.authors_enriched:
+        for row in pub.authors_enriched:
+            if not isinstance(row, dict):
+                continue
+            name = row.get("name")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            entry = {"name": name.strip()}
+            uri = row.get("uri")
+            if isinstance(uri, str) and uri.strip():
+                entry["uri"] = uri.strip()
+            author.append(entry)
+    if not author and pub.authors:
+        author = [{"name": name} for name in pub.authors]
     normalized_subject_names = [value.strip() for value in pub.subjects if isinstance(value, str) and value.strip()]
 
     def _canonical_authority_scheme(raw_scheme: str) -> str:

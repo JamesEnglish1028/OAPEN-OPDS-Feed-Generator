@@ -682,6 +682,41 @@ def test_publication_metadata_type_maps_chapter_records(tmp_path) -> None:
     assert payload["metadata"]["@type"] == "http://schema.org/Chapter"
 
 
+def test_author_orcid_pass_through_and_normalization(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "author_orcid_case.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "publications": [
+                    {
+                        "id": "author-orcid-1",
+                        "title": "Author ORCID Demo",
+                        "metadata": {
+                            "author": [
+                                {"name": "Casey Scholar", "orcid": "0000-0002-1825-0097"},
+                                {"name": "Jordan Writer"},
+                            ]
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+
+    publication = client.get("/publications/author-orcid-1")
+    assert publication.status_code == 200
+    authors = publication.json()["metadata"]["author"]
+    assert authors[0]["name"] == "Casey Scholar"
+    assert authors[0]["uri"] == "https://orcid.org/0000-0002-1825-0097"
+    assert authors[1]["name"] == "Jordan Writer"
+    assert "uri" not in authors[1]
+
+
 def test_subjects_emit_plural_only_with_authority_scheme_references(tmp_path) -> None:
     _reset_store()
     payload_path = tmp_path / "subject_authority_case.json"
@@ -843,7 +878,7 @@ def test_repository_opds_json_ingest_follows_next_and_reuses_feed_features(monke
                     "metadata": {
                         "identifier": "remote-1",
                         "title": "Remote One",
-                        "author": [{"name": "Ada Author"}],
+                        "author": [{"name": "Ada Author", "uri": "https://orcid.org/0000-0002-1825-0097"}],
                         "language": "eng",
                         "publisher": {"name": "Remote Press"},
                         "subject": [{"name": "Science"}],
@@ -928,6 +963,7 @@ def test_repository_opds_json_ingest_follows_next_and_reuses_feed_features(monke
     assert first_pub.status_code == 200
     pub_json = first_pub.json()
     assert pub_json["metadata"]["author"][0]["name"] == "Ada Author"
+    assert pub_json["metadata"]["author"][0]["uri"] == "https://orcid.org/0000-0002-1825-0097"
     assert pub_json["metadata"]["belongsTo"]["series"]["name"] == "Remote Series"
     assert pub_json["metadata"]["belongsTo"]["collection"]["name"] == "Remote Collection"
     assert pub_json["metadata"]["publisher"]["name"] == "Remote Press"

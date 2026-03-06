@@ -77,6 +77,18 @@ export OPDS_CLASSIFICATION_FACET_LINK_LIMIT="100"
 export OPDS_SUBCLASSIFICATION_FACET_LINK_LIMIT="100"
 ```
 
+ORCID author enrichment settings (optional, disabled by default):
+
+```bash
+export ORCID_ENRICHMENT_ENABLED="false"
+export ORCID_CLIENT_ID=""
+export ORCID_CLIENT_SECRET=""
+export ORCID_SANDBOX="false"
+export ORCID_HTTP_TIMEOUT_SECONDS="10"
+export ORCID_MAX_CANDIDATES="5"
+export ORCID_MATCH_THRESHOLD="0.95"
+```
+
 `OPDS_CACHE_INVALIDATE_EVERY_N_UPSERTS` controls progressive cache refresh during long ingests.  
 Use `0` to disable (default). Set a positive value (for example `500` or `1000`) to invalidate OPDS cache every N accepted upserts while ingest is running.
 

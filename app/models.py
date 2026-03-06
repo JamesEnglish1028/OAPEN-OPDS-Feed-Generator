@@ -11,6 +11,7 @@ class NormalizedPublication:
     repository_id: str = "default"
     source_publication_id: str | None = None
     authors: list[str] = field(default_factory=list)
+    authors_enriched: list[dict[str, Any]] = field(default_factory=list)
     language: str | None = None
     publisher: str | None = None
     published: str | None = None

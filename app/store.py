@@ -117,6 +117,7 @@ class PublicationRow(Base):
     source_publication_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
     title: Mapped[str] = mapped_column(String(2000), nullable=False)
     authors_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    authors_enriched_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     language: Mapped[str | None] = mapped_column(String(64), nullable=True)
     publisher: Mapped[str | None] = mapped_column(String(512), nullable=True)
     published: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -202,6 +203,10 @@ class PublicationStore:
             "source_publication_id": {
                 "sqlite": "TEXT",
                 "postgres": "VARCHAR(512)",
+            },
+            "authors_enriched_json": {
+                "sqlite": "TEXT NOT NULL DEFAULT '[]'",
+                "postgres": "TEXT NOT NULL DEFAULT '[]'",
             },
             "subject_authorities_json": {
                 "sqlite": "TEXT NOT NULL DEFAULT '[]'",
@@ -532,6 +537,7 @@ class PublicationStore:
             "source_publication_id": source_publication_id,
             "title": pub.title,
             "authors_json": json.dumps(pub.authors, ensure_ascii=True),
+            "authors_enriched_json": json.dumps(pub.authors_enriched, ensure_ascii=True),
             "language": pub.language,
             "publisher": pub.publisher,
             "published": pub.published,
@@ -2244,6 +2250,7 @@ class PublicationStore:
             source_publication_id=source_publication_id,
             title=row.title,
             authors=json.loads(row.authors_json or "[]"),
+            authors_enriched=json.loads(row.authors_enriched_json or "[]"),
             language=row.language,
             publisher=row.publisher,
             published=row.published,
