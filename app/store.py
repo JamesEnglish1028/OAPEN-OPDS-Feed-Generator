@@ -1587,6 +1587,75 @@ class PublicationStore:
                 headings.add(code[0].upper())
         return len(headings)
 
+    def _subject_slugs_for_lcc_top_code(self, repository_id: str, top_code: str) -> set[str]:
+        normalized_code = (top_code or "").strip().upper()
+        if len(normalized_code) != 1 or not normalized_code.isalpha():
+            return set()
+        with self._session() as session:
+            rows = session.execute(
+                select(PublicationSubjectRow.subject_slug, PublicationSubjectRow.subject_name).where(
+                    PublicationSubjectRow.repository_id == repository_id
+                )
+            ).all()
+        subject_slugs: set[str] = set()
+        for subject_slug, subject_name in rows:
+            if not isinstance(subject_slug, str) or not subject_slug:
+                continue
+            if not isinstance(subject_name, str) or not subject_name:
+                continue
+            lcc = resolve_lcc(subject_name)
+            if not isinstance(lcc, dict):
+                continue
+            code = lcc.get("code")
+            if isinstance(code, str) and code and code[0].upper() == normalized_code:
+                subject_slugs.add(subject_slug)
+        return subject_slugs
+
+    def page_by_lcc_top_code(
+        self,
+        *,
+        top_code: str,
+        page: int,
+        page_size: int,
+        repository_id: str = "default",
+    ) -> tuple[int, list[NormalizedPublication]]:
+        offset = (page - 1) * page_size
+        subject_slugs = self._subject_slugs_for_lcc_top_code(repository_id, top_code)
+        if not subject_slugs:
+            return 0, []
+        with self._session() as session:
+            total = int(
+                session.scalar(
+                    select(sqla_func.count(sqla_func.distinct(PublicationSubjectRow.publication_id)))
+                    .select_from(PublicationSubjectRow)
+                    .where(
+                        PublicationSubjectRow.repository_id == repository_id,
+                        PublicationSubjectRow.subject_slug.in_(list(subject_slugs)),
+                    )
+                )
+                or 0
+            )
+            statement = (
+                select(PublicationRow)
+                .join(
+                    PublicationSubjectRow,
+                    and_(
+                        PublicationSubjectRow.publication_id == PublicationRow.publication_id,
+                        PublicationSubjectRow.repository_id == PublicationRow.repository_id,
+                    ),
+                )
+                .where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationSubjectRow.subject_slug.in_(list(subject_slugs)),
+                )
+                .distinct()
+                .order_by(PublicationRow.source_publication_id.asc(), PublicationRow.publication_id.asc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            rows = session.scalars(statement).all()
+            return total, [self._to_publication(row) for row in rows]
+
     def page_by_subject_slug(
         self,
         subject_slug: str,

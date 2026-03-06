@@ -1240,10 +1240,6 @@ def _build_lcc_index_response(
     )
     last_page = max(1, (total + page_size - 1) // page_size) if page_size > 0 else 1
     start_path = "/opds" if repository_id == DEFAULT_REPOSITORY_ID else f"/repositories/{repository_id}/opds"
-    if repository_id == DEFAULT_REPOSITORY_ID:
-        search_path = "/opds/search"
-    else:
-        search_path = f"/repositories/{repository_id}/opds/search"
     links = [
         {"rel": "self", "href": _build_url(request, path, {"page": page, "page_size": page_size}), "type": "application/opds+json"},
         {"rel": "start", "href": _build_url(request, start_path, {}), "type": "application/opds+json"},
@@ -1270,7 +1266,7 @@ def _build_lcc_index_response(
         )
     navigation = [
         {
-            "href": _build_url(request, search_path, {"subject": item["term"]}),
+            "href": _build_url(request, f"{_lcc_path_prefix(repository_id)}/{item['code']}", {}),
             "type": "application/opds+json",
             "title": f"{item['term']} ({item['code']})",
             "rel": "subsection",
@@ -1388,6 +1384,12 @@ def _lcc_index_path(repository_id: str) -> str:
     if repository_id == DEFAULT_REPOSITORY_ID:
         return "/opds/navigation/lcc"
     return f"/repositories/{repository_id}/opds/navigation/lcc"
+
+
+def _lcc_path_prefix(repository_id: str) -> str:
+    if repository_id == DEFAULT_REPOSITORY_ID:
+        return "/opds/lcc"
+    return f"/repositories/{repository_id}/opds/lcc"
 
 
 def _classification_path_prefix(repository_id: str) -> str:
@@ -2362,13 +2364,9 @@ def _opds_feed_for_repository(
             }
         )
 
-        if repository_id == DEFAULT_REPOSITORY_ID:
-            search_path = "/opds/search"
-        else:
-            search_path = f"/repositories/{repository_id}/opds/search"
         lcc_group_links = [
             {
-                "href": _build_url(request, search_path, {"subject": item["term"]}),
+                "href": _build_url(request, f"{_lcc_path_prefix(repository_id)}/{item['code']}", {}),
                 "title": f"{item['term']} ({item['code']})",
                 "type": "application/opds+json",
                 "rel": "subsection",
@@ -2542,6 +2540,102 @@ def opds_lcc_index_repository(
             page=page,
             page_size=page_size,
         )
+
+    return _cached_opds_response(request, build_response, repository_id=repository_id)
+
+
+@app.get("/opds/lcc/{top_code}")
+def opds_lcc_top_level_feed(
+    top_code: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    normalized_code = top_code.strip().upper()
+    heading = next(
+        (
+            item
+            for item in store.list_lcc_heading_counts(repository_id=DEFAULT_REPOSITORY_ID, min_count=1, limit=1000, offset=0)
+            if str(item.get("code", "")).upper() == normalized_code
+        ),
+        None,
+    )
+    if heading is None:
+        raise HTTPException(status_code=404, detail="LCC heading not found")
+
+    def build_response() -> dict:
+        total, subset = store.page_by_lcc_top_code(
+            top_code=normalized_code,
+            page=page,
+            page_size=page_size,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        response = _build_feed_response(
+            request=request,
+            title=f"LCC Top-Level Subject: {heading['term']} ({normalized_code})",
+            path=f"/opds/lcc/{normalized_code}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        response = _attach_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts(repository_id=DEFAULT_REPOSITORY_ID),
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        return _attach_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID)
+
+    return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
+
+
+@app.get("/repositories/{repository_id}/opds/lcc/{top_code}")
+def opds_lcc_top_level_feed_repository(
+    repository_id: str,
+    top_code: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    _get_repository_or_404(repository_id)
+    normalized_code = top_code.strip().upper()
+    heading = next(
+        (
+            item
+            for item in store.list_lcc_heading_counts(repository_id=repository_id, min_count=1, limit=1000, offset=0)
+            if str(item.get("code", "")).upper() == normalized_code
+        ),
+        None,
+    )
+    if heading is None:
+        raise HTTPException(status_code=404, detail="LCC heading not found")
+
+    def build_response() -> dict:
+        total, subset = store.page_by_lcc_top_code(
+            top_code=normalized_code,
+            page=page,
+            page_size=page_size,
+            repository_id=repository_id,
+        )
+        response = _build_feed_response(
+            request=request,
+            title=f"LCC Top-Level Subject: {heading['term']} ({normalized_code})",
+            path=f"/repositories/{repository_id}/opds/lcc/{normalized_code}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=repository_id,
+        )
+        response = _attach_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts(repository_id=repository_id),
+            repository_id=repository_id,
+        )
+        return _attach_browse_facets(request=request, response=response, repository_id=repository_id)
 
     return _cached_opds_response(request, build_response, repository_id=repository_id)
 

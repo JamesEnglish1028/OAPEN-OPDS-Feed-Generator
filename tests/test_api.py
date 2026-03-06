@@ -359,6 +359,45 @@ def test_classification_subject_navigation_links_match_non_empty_subject_feeds(t
     assert len(payload["publications"]) >= 1
 
 
+def test_lcc_navigation_links_resolve_to_publication_feeds(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "lcc_nav_fixture.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "publications": [
+                    {"id": "lcc-nav-1", "title": "LCC Nav 1", "subjects": ["Political Science"]},
+                    {"id": "lcc-nav-2", "title": "LCC Nav 2", "subjects": ["Political Science"]},
+                    {"id": "lcc-nav-3", "title": "LCC Nav 3", "subjects": ["Political Science"]},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+
+    root = client.get("/opds?page=1&page_size=10")
+    assert root.status_code == 200
+    lcc_group = next(group for group in root.json()["groups"] if group["metadata"]["title"] == "LCC Top-Level Subjects")
+    lcc_links = lcc_group.get("navigation", [])
+    assert lcc_links
+    first_heading = next(link for link in lcc_links if "/opds/lcc/" in link["href"])
+    first_path = urlparse(first_heading["href"]).path
+    first_query = urlparse(first_heading["href"]).query
+    first_feed = client.get(first_path + (f"?{first_query}" if first_query else ""))
+    assert first_feed.status_code == 200
+    first_payload = first_feed.json()
+    assert first_payload["metadata"]["numberOfItems"] >= 1
+    assert len(first_payload["publications"]) >= 1
+
+    lcc_index = client.get("/opds/navigation/lcc?page=1&page_size=10")
+    assert lcc_index.status_code == 200
+    nav_links = lcc_index.json().get("navigation", [])
+    assert nav_links
+    assert all("/opds/lcc/" in item["href"] for item in nav_links)
+
+
 def test_opds_search_endpoint() -> None:
     _reset_store()
     sample_path = Path(__file__).parent / "data" / "sample_oapen.json"
