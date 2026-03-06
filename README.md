@@ -87,6 +87,10 @@ export ORCID_SANDBOX="false"
 export ORCID_HTTP_TIMEOUT_SECONDS="10"
 export ORCID_MAX_CANDIDATES="5"
 export ORCID_MATCH_THRESHOLD="0.95"
+export ORCID_REQUIRE_DOI="true"
+export ORCID_ENFORCE_WORK_TYPE="true"
+export ORCID_ALLOWED_WORK_TYPES="book,book-chapter,edited-book,reference-book,book-review,book-series"
+export ORCID_YEAR_TOLERANCE="1"
 ```
 
 `OPDS_CACHE_INVALIDATE_EVERY_N_UPSERTS` controls progressive cache refresh during long ingests.  
