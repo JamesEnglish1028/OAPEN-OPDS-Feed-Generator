@@ -682,7 +682,7 @@ def test_publication_metadata_type_maps_chapter_records(tmp_path) -> None:
     assert payload["metadata"]["@type"] == "http://schema.org/Chapter"
 
 
-def test_subject_authorities_backfill_emits_backward_compatible_enriched_subjects(tmp_path) -> None:
+def test_subjects_emit_plural_only_with_authority_scheme_references(tmp_path) -> None:
     _reset_store()
     payload_path = tmp_path / "subject_authority_case.json"
     payload_path.write_text(
@@ -714,15 +714,44 @@ def test_subject_authorities_backfill_emits_backward_compatible_enriched_subject
     publication = client.get("/publications/subject-authority-1")
     assert publication.status_code == 200
     metadata = publication.json()["metadata"]
-    assert metadata["subject"] == [{"name": "Political Science"}]
+    assert "subject" not in metadata
     assert isinstance(metadata.get("subjects"), list)
     assert metadata["subjects"][0]["name"] == "Political Science"
-    authority_schemes = {
-        authority.get("scheme")
-        for authority in metadata["subjects"][0].get("authorities", [])
-        if isinstance(authority, dict)
-    }
-    assert "http://id.loc.gov" in authority_schemes or "http://id.loc.gov/authorities/subjects" in authority_schemes
+    authorities = [item for item in metadata["subjects"][0].get("authorities", []) if isinstance(item, dict)]
+    assert authorities
+    assert all(isinstance(item.get("scheme"), str) and item["scheme"] in {"LCC", "LCSH", "THEMA"} for item in authorities)
+    assert all(isinstance(item.get("schemeUri"), str) and item["schemeUri"].startswith("http") for item in authorities)
+
+
+def test_subjects_emit_authorities_without_explicit_backfill(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "subject_authority_no_backfill_case.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "publications": [
+                    {
+                        "id": "subject-authority-2",
+                        "title": "Subject Authority Demo Without Backfill",
+                        "subjects": ["Political Science"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+
+    publication = client.get("/publications/subject-authority-2")
+    assert publication.status_code == 200
+    metadata = publication.json()["metadata"]
+    assert "subject" not in metadata
+    assert isinstance(metadata.get("subjects"), list)
+    assert metadata["subjects"][0]["name"] == "Political Science"
+    authorities = [item for item in metadata["subjects"][0].get("authorities", []) if isinstance(item, dict)]
+    assert authorities
 
 
 def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:

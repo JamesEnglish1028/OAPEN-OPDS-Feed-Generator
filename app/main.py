@@ -37,6 +37,11 @@ COLLECTION_FACET_LINK_LIMIT = max(1, int(os.getenv("OPDS_COLLECTION_FACET_LINK_L
 CLASSIFICATION_FACET_LINK_LIMIT = max(1, int(os.getenv("OPDS_CLASSIFICATION_FACET_LINK_LIMIT", "100")))
 SUBCLASSIFICATION_FACET_LINK_LIMIT = max(1, int(os.getenv("OPDS_SUBCLASSIFICATION_FACET_LINK_LIMIT", "100")))
 ROOT_NAV_GROUP_LINK_LIMIT = max(1, int(os.getenv("OPDS_ROOT_NAV_GROUP_LINK_LIMIT", "3")))
+AUTHORITY_SCHEME_CANONICAL: dict[str, tuple[str, str]] = {
+    "http://id.loc.gov": ("LCC", "http://id.loc.gov"),
+    "http://id.loc.gov/authorities/subjects": ("LCSH", "http://id.loc.gov/authorities/subjects"),
+    "https://ns.editeur.org/thema/": ("THEMA", "https://ns.editeur.org/thema/"),
+}
 
 app = FastAPI(title="OAPEN OPDS Feed Generator", version="0.2.0")
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -703,7 +708,63 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
             accessibility.append(item)
 
     author = [{"name": name} for name in pub.authors] if pub.authors else []
-    subject = [{"name": value} for value in pub.subjects] if pub.subjects else []
+    normalized_subject_names = [value for value in pub.subjects if isinstance(value, str) and value.strip()]
+
+    def _canonical_authority_scheme(raw_scheme: str) -> tuple[str, str]:
+        normalized = raw_scheme.strip().casefold()
+        if normalized in AUTHORITY_SCHEME_CANONICAL:
+            return AUTHORITY_SCHEME_CANONICAL[normalized]
+        if normalized == "lcc":
+            return AUTHORITY_SCHEME_CANONICAL["http://id.loc.gov"]
+        if normalized == "lcsh":
+            return AUTHORITY_SCHEME_CANONICAL["http://id.loc.gov/authorities/subjects"]
+        if normalized == "thema":
+            return AUTHORITY_SCHEME_CANONICAL["https://ns.editeur.org/thema/"]
+        return raw_scheme.strip().upper(), raw_scheme.strip()
+
+    def _normalize_authority_record(row: dict) -> dict | None:
+        scheme = row.get("scheme")
+        term = row.get("term")
+        code = row.get("code")
+        if not isinstance(scheme, str) or not scheme.strip():
+            return None
+        if not isinstance(term, str) or not term.strip():
+            return None
+        scheme_name, scheme_uri = _canonical_authority_scheme(scheme)
+        authority = {"scheme": scheme_name, "schemeUri": scheme_uri, "term": term.strip()}
+        if isinstance(code, str) and code.strip():
+            authority["code"] = code.strip()
+        return authority
+
+    def _computed_authorities_for_subject(subject_name: str) -> list[dict]:
+        computed_rows: list[dict] = []
+        lcc_match = resolve_lcc(subject_name)
+        if isinstance(lcc_match, dict):
+            computed_rows.append(lcc_match)
+        lcsh_matches = resolve_lcsh(subject_name)
+        if isinstance(lcsh_matches, list):
+            computed_rows.extend([item for item in lcsh_matches if isinstance(item, dict)])
+        thema_matches = resolve_thema(subject_name)
+        if isinstance(thema_matches, list):
+            computed_rows.extend([item for item in thema_matches if isinstance(item, dict)])
+
+        normalized_authorities: list[dict] = []
+        seen: set[tuple[str, str, str]] = set()
+        for row in computed_rows:
+            normalized = _normalize_authority_record(row)
+            if normalized is None:
+                continue
+            dedupe_key = (
+                normalized["scheme"],
+                normalized.get("term", ""),
+                normalized.get("code", ""),
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            normalized_authorities.append(normalized)
+        return normalized_authorities
+
     enriched_subjects = []
     raw_subject_authorities = pub.subject_authorities if isinstance(pub.subject_authorities, list) else []
     authorities_by_slug: dict[str, list[dict]] = {}
@@ -723,9 +784,9 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
             continue
         if not isinstance(term, str) or not term:
             continue
-        authority = {"scheme": scheme, "term": term}
-        if isinstance(code, str) and code:
-            authority["code"] = code
+        authority = _normalize_authority_record({"scheme": scheme, "term": term, "code": code})
+        if authority is None:
+            continue
         authorities_by_slug.setdefault(subject_slug, []).append(authority)
     seen_enriched_slugs: set[str] = set()
     for row in raw_subject_authorities:
@@ -743,8 +804,13 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
             enriched_subject["authorities"] = authorities
         enriched_subjects.append(enriched_subject)
         seen_enriched_slugs.add(subject_slug)
-    if not enriched_subjects and subject:
-        enriched_subjects = [{"name": item["name"]} for item in subject]
+    if not enriched_subjects and normalized_subject_names:
+        for subject_name in normalized_subject_names:
+            enriched_subject = {"name": subject_name}
+            computed_authorities = _computed_authorities_for_subject(subject_name)
+            if computed_authorities:
+                enriched_subject["authorities"] = computed_authorities
+            enriched_subjects.append(enriched_subject)
 
     description = metadata_src.get("description")
     if not isinstance(description, str) or not description.strip():
@@ -759,7 +825,6 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
             "modified": modified,
             "published": modified,
             "author": author,
-            "subject": subject,
             "subjects": enriched_subjects,
         }
     )
