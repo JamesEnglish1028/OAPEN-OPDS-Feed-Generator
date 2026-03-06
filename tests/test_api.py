@@ -716,11 +716,20 @@ def test_subjects_emit_plural_only_with_authority_scheme_references(tmp_path) ->
     metadata = publication.json()["metadata"]
     assert "subject" not in metadata
     assert isinstance(metadata.get("subjects"), list)
-    assert metadata["subjects"][0]["name"] == "Political Science"
-    authorities = [item for item in metadata["subjects"][0].get("authorities", []) if isinstance(item, dict)]
-    assert authorities
-    assert all(isinstance(item.get("scheme"), str) and item["scheme"] in {"LCC", "LCSH", "THEMA"} for item in authorities)
-    assert all(isinstance(item.get("schemeUri"), str) and item["schemeUri"].startswith("http") for item in authorities)
+    subjects = [item for item in metadata["subjects"] if isinstance(item, dict)]
+    assert subjects
+    assert all(isinstance(item.get("name"), str) and item["name"].strip() for item in subjects)
+    assert all(isinstance(item.get("sortAs"), str) and item["sortAs"].strip() for item in subjects)
+    assert all("authorities" not in item for item in subjects)
+    canonical_schemes = {
+        "http://id.loc.gov",
+        "http://id.loc.gov/authorities/subjects",
+        "https://ns.editeur.org/thema/",
+    }
+    scheme_subjects = [item for item in subjects if isinstance(item.get("scheme"), str)]
+    assert scheme_subjects
+    assert all(item["scheme"] in canonical_schemes for item in scheme_subjects)
+    assert any(item.get("code") == "JA" for item in scheme_subjects)
 
 
 def test_subjects_emit_authorities_without_explicit_backfill(tmp_path) -> None:
@@ -749,9 +758,13 @@ def test_subjects_emit_authorities_without_explicit_backfill(tmp_path) -> None:
     metadata = publication.json()["metadata"]
     assert "subject" not in metadata
     assert isinstance(metadata.get("subjects"), list)
-    assert metadata["subjects"][0]["name"] == "Political Science"
-    authorities = [item for item in metadata["subjects"][0].get("authorities", []) if isinstance(item, dict)]
-    assert authorities
+    subjects = [item for item in metadata["subjects"] if isinstance(item, dict)]
+    assert subjects
+    assert all(isinstance(item.get("name"), str) and item["name"].strip() for item in subjects)
+    assert all(isinstance(item.get("sortAs"), str) and item["sortAs"].strip() for item in subjects)
+    assert all("authorities" not in item for item in subjects)
+    assert any(item.get("scheme") == "http://id.loc.gov" and item.get("code") == "JA" for item in subjects)
+    assert any(item.get("scheme") == "https://ns.editeur.org/thema/" and item.get("code") == "JPA" for item in subjects)
 
 
 def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:

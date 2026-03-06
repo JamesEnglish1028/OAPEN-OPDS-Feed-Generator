@@ -37,10 +37,10 @@ COLLECTION_FACET_LINK_LIMIT = max(1, int(os.getenv("OPDS_COLLECTION_FACET_LINK_L
 CLASSIFICATION_FACET_LINK_LIMIT = max(1, int(os.getenv("OPDS_CLASSIFICATION_FACET_LINK_LIMIT", "100")))
 SUBCLASSIFICATION_FACET_LINK_LIMIT = max(1, int(os.getenv("OPDS_SUBCLASSIFICATION_FACET_LINK_LIMIT", "100")))
 ROOT_NAV_GROUP_LINK_LIMIT = max(1, int(os.getenv("OPDS_ROOT_NAV_GROUP_LINK_LIMIT", "3")))
-AUTHORITY_SCHEME_CANONICAL: dict[str, tuple[str, str]] = {
-    "http://id.loc.gov": ("LCC", "http://id.loc.gov"),
-    "http://id.loc.gov/authorities/subjects": ("LCSH", "http://id.loc.gov/authorities/subjects"),
-    "https://ns.editeur.org/thema/": ("THEMA", "https://ns.editeur.org/thema/"),
+AUTHORITY_SCHEME_CANONICAL: dict[str, str] = {
+    "http://id.loc.gov": "http://id.loc.gov",
+    "http://id.loc.gov/authorities/subjects": "http://id.loc.gov/authorities/subjects",
+    "https://ns.editeur.org/thema/": "https://ns.editeur.org/thema/",
 }
 
 app = FastAPI(title="OAPEN OPDS Feed Generator", version="0.2.0")
@@ -708,9 +708,9 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
             accessibility.append(item)
 
     author = [{"name": name} for name in pub.authors] if pub.authors else []
-    normalized_subject_names = [value for value in pub.subjects if isinstance(value, str) and value.strip()]
+    normalized_subject_names = [value.strip() for value in pub.subjects if isinstance(value, str) and value.strip()]
 
-    def _canonical_authority_scheme(raw_scheme: str) -> tuple[str, str]:
+    def _canonical_authority_scheme(raw_scheme: str) -> str:
         normalized = raw_scheme.strip().casefold()
         if normalized in AUTHORITY_SCHEME_CANONICAL:
             return AUTHORITY_SCHEME_CANONICAL[normalized]
@@ -720,7 +720,15 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
             return AUTHORITY_SCHEME_CANONICAL["http://id.loc.gov/authorities/subjects"]
         if normalized == "thema":
             return AUTHORITY_SCHEME_CANONICAL["https://ns.editeur.org/thema/"]
-        return raw_scheme.strip().upper(), raw_scheme.strip()
+        return raw_scheme.strip()
+
+    def _subject_sort_as(value: str) -> str:
+        candidate = value.strip()
+        if ":" in candidate:
+            trailing = candidate.split(":")[-1].strip()
+            if trailing:
+                return trailing
+        return candidate
 
     def _normalize_authority_record(row: dict) -> dict | None:
         scheme = row.get("scheme")
@@ -730,13 +738,20 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
             return None
         if not isinstance(term, str) or not term.strip():
             return None
-        scheme_name, scheme_uri = _canonical_authority_scheme(scheme)
-        authority = {"scheme": scheme_name, "schemeUri": scheme_uri, "term": term.strip()}
+        scheme_uri = _canonical_authority_scheme(scheme)
+        authority = {
+            "name": term.strip(),
+            "sortAs": _subject_sort_as(term),
+            "scheme": scheme_uri,
+        }
         if isinstance(code, str) and code.strip():
             authority["code"] = code.strip()
+        subject_name = row.get("subject_name")
+        if isinstance(subject_name, str) and subject_name.strip():
+            authority["sourceSubjectName"] = subject_name.strip()
         return authority
 
-    def _computed_authorities_for_subject(subject_name: str) -> list[dict]:
+    def _computed_subject_entries_for_subject(subject_name: str) -> list[dict]:
         computed_rows: list[dict] = []
         lcc_match = resolve_lcc(subject_name)
         if isinstance(lcc_match, dict):
@@ -755,8 +770,8 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
             if normalized is None:
                 continue
             dedupe_key = (
-                normalized["scheme"],
-                normalized.get("term", ""),
+                normalized.get("scheme", ""),
+                normalized.get("name", ""),
                 normalized.get("code", ""),
             )
             if dedupe_key in seen:
@@ -767,17 +782,14 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
 
     enriched_subjects = []
     raw_subject_authorities = pub.subject_authorities if isinstance(pub.subject_authorities, list) else []
-    authorities_by_slug: dict[str, list[dict]] = {}
+    authorities_by_subject_name: dict[str, list[dict]] = {}
     for row in raw_subject_authorities:
         if not isinstance(row, dict):
             continue
-        subject_slug = row.get("subject_slug")
         subject_name = row.get("subject_name")
         scheme = row.get("scheme")
         term = row.get("term")
         code = row.get("code")
-        if not isinstance(subject_slug, str) or not subject_slug:
-            continue
         if not isinstance(subject_name, str) or not subject_name:
             continue
         if not isinstance(scheme, str) or not scheme:
@@ -787,30 +799,46 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
         authority = _normalize_authority_record({"scheme": scheme, "term": term, "code": code})
         if authority is None:
             continue
-        authorities_by_slug.setdefault(subject_slug, []).append(authority)
-    seen_enriched_slugs: set[str] = set()
-    for row in raw_subject_authorities:
-        if not isinstance(row, dict):
-            continue
-        subject_slug = row.get("subject_slug")
-        subject_name = row.get("subject_name")
-        if not isinstance(subject_slug, str) or not subject_slug or subject_slug in seen_enriched_slugs:
-            continue
-        if not isinstance(subject_name, str) or not subject_name:
-            continue
-        enriched_subject = {"name": subject_name}
-        authorities = authorities_by_slug.get(subject_slug, [])
-        if authorities:
-            enriched_subject["authorities"] = authorities
-        enriched_subjects.append(enriched_subject)
-        seen_enriched_slugs.add(subject_slug)
-    if not enriched_subjects and normalized_subject_names:
-        for subject_name in normalized_subject_names:
-            enriched_subject = {"name": subject_name}
-            computed_authorities = _computed_authorities_for_subject(subject_name)
-            if computed_authorities:
-                enriched_subject["authorities"] = computed_authorities
-            enriched_subjects.append(enriched_subject)
+        key = subject_name.strip().casefold()
+        authorities_by_subject_name.setdefault(key, []).append(authority)
+
+    seen_subject_entries: set[tuple[str, str, str]] = set()
+    for subject_name in normalized_subject_names:
+        subject_key = subject_name.casefold()
+        entries = authorities_by_subject_name.get(subject_key, [])
+        if not entries:
+            entries = _computed_subject_entries_for_subject(subject_name)
+        if not entries:
+            entries = [{"name": subject_name, "sortAs": _subject_sort_as(subject_name)}]
+        for entry in entries:
+            dedupe_key = (
+                str(entry.get("name", "")),
+                str(entry.get("scheme", "")),
+                str(entry.get("code", "")),
+            )
+            if dedupe_key in seen_subject_entries:
+                continue
+            seen_subject_entries.add(dedupe_key)
+            entry.pop("sourceSubjectName", None)
+            enriched_subjects.append(entry)
+
+    if not enriched_subjects and raw_subject_authorities:
+        for row in raw_subject_authorities:
+            if not isinstance(row, dict):
+                continue
+            normalized = _normalize_authority_record(row)
+            if normalized is None:
+                continue
+            normalized.pop("sourceSubjectName", None)
+            dedupe_key = (
+                str(normalized.get("name", "")),
+                str(normalized.get("scheme", "")),
+                str(normalized.get("code", "")),
+            )
+            if dedupe_key in seen_subject_entries:
+                continue
+            seen_subject_entries.add(dedupe_key)
+            enriched_subjects.append(normalized)
 
     description = metadata_src.get("description")
     if not isinstance(description, str) or not description.strip():
