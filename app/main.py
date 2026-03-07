@@ -2599,13 +2599,7 @@ def opds_lcc_top_level_feed(
             subset=subset,
             repository_id=DEFAULT_REPOSITORY_ID,
         )
-        response = _attach_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts(repository_id=DEFAULT_REPOSITORY_ID),
-            repository_id=DEFAULT_REPOSITORY_ID,
-        )
-        return _attach_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID)
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
 
@@ -2648,13 +2642,7 @@ def opds_lcc_top_level_feed_repository(
             subset=subset,
             repository_id=repository_id,
         )
-        response = _attach_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts(repository_id=repository_id),
-            repository_id=repository_id,
-        )
-        return _attach_browse_facets(request=request, response=response, repository_id=repository_id)
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=repository_id)
 
@@ -3242,19 +3230,13 @@ def opds_classification_feed(
             subset=subset,
             repository_id=DEFAULT_REPOSITORY_ID,
         )
-        response = _attach_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts(repository_id=DEFAULT_REPOSITORY_ID),
-            repository_id=DEFAULT_REPOSITORY_ID,
-        )
         response = _attach_subclassification_facets(
             request=request,
             response=response,
             repository_id=DEFAULT_REPOSITORY_ID,
             category_slug=classification_slug,
         )
-        return _attach_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID)
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
 
@@ -3290,19 +3272,13 @@ def opds_classification_feed_repository(
             subset=subset,
             repository_id=repository_id,
         )
-        response = _attach_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts(repository_id=repository_id),
-            repository_id=repository_id,
-        )
         response = _attach_subclassification_facets(
             request=request,
             response=response,
             repository_id=repository_id,
             category_slug=classification_slug,
         )
-        return _attach_browse_facets(request=request, response=response, repository_id=repository_id)
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=repository_id)
 
@@ -3354,13 +3330,7 @@ def opds_subclassification_feed(
             repository_id=DEFAULT_REPOSITORY_ID,
         )
         response["metadata"]["belongsTo"] = {"classification": category_name}
-        response = _attach_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts(repository_id=DEFAULT_REPOSITORY_ID),
-            repository_id=DEFAULT_REPOSITORY_ID,
-        )
-        return _attach_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID)
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
 
@@ -3414,13 +3384,7 @@ def opds_subclassification_feed_repository(
             repository_id=repository_id,
         )
         response["metadata"]["belongsTo"] = {"classification": category_name}
-        response = _attach_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts(repository_id=repository_id),
-            repository_id=repository_id,
-        )
-        return _attach_browse_facets(request=request, response=response, repository_id=repository_id)
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=repository_id)
 
@@ -3528,14 +3492,7 @@ def opds_year_collection_feed(
             subset=subset,
             repository_id=DEFAULT_REPOSITORY_ID,
         )
-        response = _attach_year_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts_by_publication_year(year=year, repository_id=DEFAULT_REPOSITORY_ID),
-            repository_id=DEFAULT_REPOSITORY_ID,
-            year=year,
-        )
-        return _attach_year_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID, year=year)
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
 
@@ -3569,14 +3526,7 @@ def opds_year_collection_feed_repository(
             subset=subset,
             repository_id=repository_id,
         )
-        response = _attach_year_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts_by_publication_year(year=year, repository_id=repository_id),
-            repository_id=repository_id,
-            year=year,
-        )
-        return _attach_year_browse_facets(request=request, response=response, repository_id=repository_id, year=year)
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=repository_id)
 
@@ -3615,13 +3565,6 @@ def opds_year_classification_feed(
             subset=subset,
             repository_id=DEFAULT_REPOSITORY_ID,
         )
-        response = _attach_year_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts_by_publication_year(year=year, repository_id=DEFAULT_REPOSITORY_ID),
-            repository_id=DEFAULT_REPOSITORY_ID,
-            year=year,
-        )
         response = _attach_subclassification_facets(
             request=request,
             response=response,
@@ -3629,7 +3572,7 @@ def opds_year_classification_feed(
             category_slug=classification_slug,
             year=year,
         )
-        return _attach_year_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID, year=year)
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
 
@@ -3670,13 +3613,6 @@ def opds_year_classification_feed_repository(
             subset=subset,
             repository_id=repository_id,
         )
-        response = _attach_year_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts_by_publication_year(year=year, repository_id=repository_id),
-            repository_id=repository_id,
-            year=year,
-        )
         response = _attach_subclassification_facets(
             request=request,
             response=response,
@@ -3684,7 +3620,7 @@ def opds_year_classification_feed_repository(
             category_slug=classification_slug,
             year=year,
         )
-        return _attach_year_browse_facets(request=request, response=response, repository_id=repository_id, year=year)
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=repository_id)
 
@@ -3742,14 +3678,7 @@ def opds_year_subclassification_feed(
             repository_id=DEFAULT_REPOSITORY_ID,
         )
         response["metadata"]["belongsTo"] = {"classification": category_name}
-        response = _attach_year_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts_by_publication_year(year=year, repository_id=DEFAULT_REPOSITORY_ID),
-            repository_id=DEFAULT_REPOSITORY_ID,
-            year=year,
-        )
-        return _attach_year_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID, year=year)
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
 
@@ -3809,14 +3738,7 @@ def opds_year_subclassification_feed_repository(
             repository_id=repository_id,
         )
         response["metadata"]["belongsTo"] = {"classification": category_name}
-        response = _attach_year_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts_by_publication_year(year=year, repository_id=repository_id),
-            repository_id=repository_id,
-            year=year,
-        )
-        return _attach_year_browse_facets(request=request, response=response, repository_id=repository_id, year=year)
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=repository_id)
 
@@ -3851,14 +3773,7 @@ def opds_year_language_feed(
             subset=subset,
             repository_id=DEFAULT_REPOSITORY_ID,
         )
-        response = _attach_year_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts_by_publication_year(year=year, repository_id=DEFAULT_REPOSITORY_ID),
-            repository_id=DEFAULT_REPOSITORY_ID,
-            year=year,
-        )
-        return _attach_year_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID, year=year)
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
 
@@ -3895,14 +3810,7 @@ def opds_year_language_feed_repository(
             subset=subset,
             repository_id=repository_id,
         )
-        response = _attach_year_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts_by_publication_year(year=year, repository_id=repository_id),
-            repository_id=repository_id,
-            year=year,
-        )
-        return _attach_year_browse_facets(request=request, response=response, repository_id=repository_id, year=year)
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=repository_id)
 
@@ -3935,13 +3843,7 @@ def opds_language_feed(
             subset=subset,
             repository_id=DEFAULT_REPOSITORY_ID,
         )
-        response = _attach_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts(repository_id=DEFAULT_REPOSITORY_ID),
-            repository_id=DEFAULT_REPOSITORY_ID,
-        )
-        return _attach_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID)
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
 
@@ -3976,13 +3878,7 @@ def opds_language_feed_repository(
             subset=subset,
             repository_id=repository_id,
         )
-        response = _attach_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts(repository_id=repository_id),
-            repository_id=repository_id,
-        )
-        return _attach_browse_facets(request=request, response=response, repository_id=repository_id)
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=repository_id)
 

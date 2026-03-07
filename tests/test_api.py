@@ -295,8 +295,7 @@ def test_collection_and_language_subfeeds() -> None:
     assert language_feed.status_code == 200
     language_json = language_feed.json()
     assert language_json["metadata"]["numberOfItems"] == 3
-    assert "facets" in language_json
-    assert language_json["facets"][0]["metadata"]["title"] == "Language"
+    assert "facets" not in language_json
     assert any(link["rel"] == "start" for link in language_json["links"])
     assert any(link["rel"] == "up" for link in language_json["links"])
 
