@@ -18,6 +18,7 @@ from app.cache import OpdsCache
 from app.db_migrations import run_migrations
 from app.harvest import run_incremental_for_all_checkpoints
 from app.orcid_enrichment import enrich_publication_authors
+from app.publication_groups import list_publication_groups, publication_group_by_slug
 from app.scheduler import IncrementalHarvestScheduler
 from app.sources import extract_json_records, iter_json_records, iter_json_records_from_url, load_json_payload_from_url, load_oai_dc_records
 from app.store import IngestResult, PublicationStore, RepositoryConfig
@@ -2352,7 +2353,6 @@ def _opds_feed_for_repository(
                 "type": "application/opds+json",
                 "rel": "subsection",
                 "numberOfItems": int(item["count"]),
-                "numberOfItems": int(item["count"]),
             }
             for item in languages[:ROOT_NAV_GROUP_LINK_LIMIT]
         ]
@@ -2371,7 +2371,6 @@ def _opds_feed_for_repository(
                 "title": f"{item['term']} ({item['code']})",
                 "type": "application/opds+json",
                 "rel": "subsection",
-                "numberOfItems": int(item["count"]),
                 "numberOfItems": int(item["count"]),
             }
             for item in lcc_headings
@@ -2392,7 +2391,6 @@ def _opds_feed_for_repository(
                 "type": "application/opds+json",
                 "rel": "subsection",
                 "numberOfItems": int(item["count"]),
-                "numberOfItems": int(item["count"]),
             }
             for item in collection_items
         ]
@@ -2406,7 +2404,7 @@ def _opds_feed_for_repository(
         )
 
         response.pop("navigation", None)
-        response["groups"] = [
+        groups = [
             {
                 "metadata": {"title": "Language"},
                 "navigation": language_group_links,
@@ -2420,6 +2418,47 @@ def _opds_feed_for_repository(
                 "navigation": collection_group_links,
             },
         ]
+
+        publication_group_counts = store.list_publication_group_counts(repository_id=repository_id)
+        for definition in list_publication_groups():
+            total_items = next(
+                (
+                    int(item["count"])
+                    for item in publication_group_counts
+                    if isinstance(item, dict) and item.get("slug") == definition.slug
+                ),
+                0,
+            )
+            _, preview_subset = store.page_by_publication_group_slug(
+                group_slug=definition.slug,
+                page=1,
+                page_size=10,
+                repository_id=repository_id,
+            )
+            if repository_id == DEFAULT_REPOSITORY_ID:
+                group_path = f"/opds/groups/{definition.slug}"
+            else:
+                group_path = f"/repositories/{repository_id}/opds/groups/{definition.slug}"
+            groups.append(
+                {
+                    "metadata": {
+                        "title": definition.title,
+                        "numberOfItems": total_items,
+                    },
+                    "links": [
+                        {
+                            "rel": "self",
+                            "href": _build_url(request, group_path, {}),
+                            "type": "application/opds+json",
+                        }
+                    ],
+                    "publications": [
+                        _to_opds_publication(pub, base_url=str(request.base_url).rstrip("/"), repository_id=repository_id)
+                        for pub in preview_subset
+                    ],
+                }
+            )
+        response["groups"] = groups
         response.pop("facets", None)
         return response
 
@@ -2626,6 +2665,86 @@ def opds_lcc_top_level_feed_repository(
             request=request,
             title=f"LCC Top-Level Subject: {heading['term']} ({normalized_code})",
             path=f"/repositories/{repository_id}/opds/lcc/{normalized_code}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=repository_id,
+        )
+        response = _attach_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts(repository_id=repository_id),
+            repository_id=repository_id,
+        )
+        return _attach_browse_facets(request=request, response=response, repository_id=repository_id)
+
+    return _cached_opds_response(request, build_response, repository_id=repository_id)
+
+
+@app.get("/opds/groups/{group_slug}")
+def opds_publication_group_feed(
+    group_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    group = publication_group_by_slug(group_slug)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Publication group not found")
+
+    def build_response() -> dict:
+        total, subset = store.page_by_publication_group_slug(
+            group_slug=group.slug,
+            page=page,
+            page_size=page_size,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        response = _build_feed_response(
+            request=request,
+            title=f"Group: {group.title}",
+            path=f"/opds/groups/{group.slug}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        response = _attach_language_facets(
+            request=request,
+            response=response,
+            language_counts=store.list_language_counts(repository_id=DEFAULT_REPOSITORY_ID),
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        return _attach_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID)
+
+    return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
+
+
+@app.get("/repositories/{repository_id}/opds/groups/{group_slug}")
+def opds_publication_group_feed_repository(
+    repository_id: str,
+    group_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    _get_repository_or_404(repository_id)
+    group = publication_group_by_slug(group_slug)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Publication group not found")
+
+    def build_response() -> dict:
+        total, subset = store.page_by_publication_group_slug(
+            group_slug=group.slug,
+            page=page,
+            page_size=page_size,
+            repository_id=repository_id,
+        )
+        response = _build_feed_response(
+            request=request,
+            title=f"Group: {group.title}",
+            path=f"/repositories/{repository_id}/opds/groups/{group.slug}",
             page=page,
             page_size=page_size,
             total=total,

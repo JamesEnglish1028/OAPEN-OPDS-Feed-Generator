@@ -398,6 +398,40 @@ def test_lcc_navigation_links_resolve_to_publication_feeds(tmp_path) -> None:
     assert all("/opds/lcc/" in item["href"] for item in nav_links)
 
 
+def test_root_publication_groups_emit_preview_and_group_feed(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "publication_groups_fixture.json"
+    publications = []
+    for index in range(1, 13):
+        publications.append(
+            {
+                "id": f"group-social-{index}",
+                "title": f"Social Science Title {index}",
+                "subjects": ["Political Science"],
+            }
+        )
+    publications.append({"id": "group-human-1", "title": "Humanities Title", "subjects": ["History"]})
+    payload_path.write_text(json.dumps({"publications": publications}), encoding="utf-8")
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+
+    root_feed = client.get("/opds?page=1&page_size=10")
+    assert root_feed.status_code == 200
+    groups = root_feed.json().get("groups", [])
+    social = next(group for group in groups if group.get("metadata", {}).get("title") == "Social Science")
+    assert social["metadata"]["numberOfItems"] == 12
+    assert len(social.get("publications", [])) == 10
+    assert social.get("links")
+    assert social["links"][0]["rel"] == "self"
+    assert "/opds/groups/social-science" in social["links"][0]["href"]
+
+    social_feed = client.get("/opds/groups/social-science?page=1&page_size=5")
+    assert social_feed.status_code == 200
+    social_payload = social_feed.json()
+    assert social_payload["metadata"]["numberOfItems"] == 12
+    assert len(social_payload["publications"]) == 5
+
+
 def test_opds_search_endpoint() -> None:
     _reset_store()
     sample_path = Path(__file__).parent / "data" / "sample_oapen.json"
