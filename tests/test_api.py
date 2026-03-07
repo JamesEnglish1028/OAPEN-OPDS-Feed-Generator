@@ -429,7 +429,18 @@ def test_root_publication_groups_emit_preview_and_group_feed(tmp_path) -> None:
     assert social_feed.status_code == 200
     social_payload = social_feed.json()
     assert social_payload["metadata"]["numberOfItems"] == 12
-    assert len(social_payload["publications"]) == 5
+    social_groups = social_payload.get("groups", [])
+    assert social_groups
+    political_science = next(group for group in social_groups if group["metadata"]["title"] == "Political Science")
+    assert political_science["metadata"]["numberOfItems"] == 12
+    assert len(political_science.get("publications", [])) == 10
+    subgroup_href = political_science["links"][0]["href"]
+    subgroup_path = urlparse(subgroup_href).path
+    subgroup_query = urlparse(subgroup_href).query
+    subgroup_feed = client.get(subgroup_path + (f"?{subgroup_query}" if subgroup_query else ""))
+    assert subgroup_feed.status_code == 200
+    subgroup_payload = subgroup_feed.json()
+    assert subgroup_payload["metadata"]["numberOfItems"] == 12
 
 
 def test_opds_search_endpoint() -> None:

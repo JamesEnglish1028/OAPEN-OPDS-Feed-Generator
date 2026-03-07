@@ -18,7 +18,7 @@ from app.cache import OpdsCache
 from app.db_migrations import run_migrations
 from app.harvest import run_incremental_for_all_checkpoints
 from app.orcid_enrichment import enrich_publication_authors
-from app.publication_groups import list_publication_groups, publication_group_by_slug
+from app.publication_groups import list_publication_groups, list_subgroups_for_group, publication_group_by_slug
 from app.scheduler import IncrementalHarvestScheduler
 from app.sources import extract_json_records, iter_json_records, iter_json_records_from_url, load_json_payload_from_url, load_oai_dc_records
 from app.store import IngestResult, PublicationStore, RepositoryConfig
@@ -2663,29 +2663,62 @@ def opds_publication_group_feed(
         raise HTTPException(status_code=404, detail="Publication group not found")
 
     def build_response() -> dict:
-        total, subset = store.page_by_publication_group_slug(
+        total, _ = store.page_by_publication_group_slug(
             group_slug=group.slug,
             page=page,
             page_size=page_size,
             repository_id=DEFAULT_REPOSITORY_ID,
         )
-        response = _build_feed_response(
-            request=request,
-            title=f"Group: {group.title}",
-            path=f"/opds/groups/{group.slug}",
-            page=page,
-            page_size=page_size,
-            total=total,
-            subset=subset,
-            repository_id=DEFAULT_REPOSITORY_ID,
-        )
-        response = _attach_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts(repository_id=DEFAULT_REPOSITORY_ID),
-            repository_id=DEFAULT_REPOSITORY_ID,
-        )
-        return _attach_browse_facets(request=request, response=response, repository_id=DEFAULT_REPOSITORY_ID)
+        subgroup_counts = store.list_publication_subgroup_counts(group_slug=group.slug, repository_id=DEFAULT_REPOSITORY_ID)
+        groups = []
+        for subgroup in subgroup_counts:
+            subgroup_slug = str(subgroup["slug"])
+            subgroup_total = int(subgroup["count"])
+            _, preview_subset = store.page_by_publication_subgroup_slug(
+                group_slug=group.slug,
+                subgroup_slug=subgroup_slug,
+                page=1,
+                page_size=10,
+                repository_id=DEFAULT_REPOSITORY_ID,
+            )
+            subgroup_path = f"/opds/groups/{group.slug}/subjects/{subgroup_slug}"
+            groups.append(
+                {
+                    "metadata": {"title": subgroup["title"], "numberOfItems": subgroup_total},
+                    "links": [
+                        {
+                            "rel": "self",
+                            "href": _build_url(request, subgroup_path, {}),
+                            "type": "application/opds+json",
+                        }
+                    ],
+                    "publications": [
+                        _to_opds_publication(
+                            pub,
+                            base_url=str(request.base_url).rstrip("/"),
+                            repository_id=DEFAULT_REPOSITORY_ID,
+                        )
+                        for pub in preview_subset
+                    ],
+                }
+            )
+
+        start_path = "/opds"
+        response = {
+            "metadata": {
+                "@type": "https://opds.io/opds-catalog",
+                "title": f"Group: {group.title}",
+                "numberOfItems": total,
+                "itemsPerPage": page_size,
+                "currentPage": page,
+            },
+            "links": [
+                {"rel": "self", "href": _build_url(request, f"/opds/groups/{group.slug}", {"page": page, "page_size": page_size}), "type": "application/opds+json"},
+                {"rel": "start", "href": _build_url(request, start_path, {}), "type": "application/opds+json"},
+            ],
+            "groups": groups,
+        }
+        return response
 
     return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
 
@@ -2704,29 +2737,138 @@ def opds_publication_group_feed_repository(
         raise HTTPException(status_code=404, detail="Publication group not found")
 
     def build_response() -> dict:
-        total, subset = store.page_by_publication_group_slug(
+        total, _ = store.page_by_publication_group_slug(
             group_slug=group.slug,
             page=page,
             page_size=page_size,
             repository_id=repository_id,
         )
-        response = _build_feed_response(
+        subgroup_counts = store.list_publication_subgroup_counts(group_slug=group.slug, repository_id=repository_id)
+        groups = []
+        for subgroup in subgroup_counts:
+            subgroup_slug = str(subgroup["slug"])
+            subgroup_total = int(subgroup["count"])
+            _, preview_subset = store.page_by_publication_subgroup_slug(
+                group_slug=group.slug,
+                subgroup_slug=subgroup_slug,
+                page=1,
+                page_size=10,
+                repository_id=repository_id,
+            )
+            subgroup_path = f"/repositories/{repository_id}/opds/groups/{group.slug}/subjects/{subgroup_slug}"
+            groups.append(
+                {
+                    "metadata": {"title": subgroup["title"], "numberOfItems": subgroup_total},
+                    "links": [
+                        {
+                            "rel": "self",
+                            "href": _build_url(request, subgroup_path, {}),
+                            "type": "application/opds+json",
+                        }
+                    ],
+                    "publications": [
+                        _to_opds_publication(
+                            pub,
+                            base_url=str(request.base_url).rstrip("/"),
+                            repository_id=repository_id,
+                        )
+                        for pub in preview_subset
+                    ],
+                }
+            )
+
+        start_path = f"/repositories/{repository_id}/opds"
+        response = {
+            "metadata": {
+                "@type": "https://opds.io/opds-catalog",
+                "title": f"Group: {group.title}",
+                "numberOfItems": total,
+                "itemsPerPage": page_size,
+                "currentPage": page,
+            },
+            "links": [
+                {"rel": "self", "href": _build_url(request, f"/repositories/{repository_id}/opds/groups/{group.slug}", {"page": page, "page_size": page_size}), "type": "application/opds+json"},
+                {"rel": "start", "href": _build_url(request, start_path, {}), "type": "application/opds+json"},
+            ],
+            "groups": groups,
+        }
+        return response
+
+    return _cached_opds_response(request, build_response, repository_id=repository_id)
+
+
+@app.get("/opds/groups/{group_slug}/subjects/{subgroup_slug}")
+def opds_publication_subgroup_feed(
+    group_slug: str,
+    subgroup_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    group = publication_group_by_slug(group_slug)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Publication group not found")
+    subgroup = next((item for item in list_subgroups_for_group(group.slug) if item["slug"] == subgroup_slug), None)
+    if subgroup is None:
+        raise HTTPException(status_code=404, detail="Publication subgroup not found")
+
+    def build_response() -> dict:
+        total, subset = store.page_by_publication_subgroup_slug(
+            group_slug=group.slug,
+            subgroup_slug=subgroup_slug,
+            page=page,
+            page_size=page_size,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+        return _build_feed_response(
             request=request,
-            title=f"Group: {group.title}",
-            path=f"/repositories/{repository_id}/opds/groups/{group.slug}",
+            title=f"Group: {group.title} / {subgroup['title']}",
+            path=f"/opds/groups/{group.slug}/subjects/{subgroup_slug}",
+            page=page,
+            page_size=page_size,
+            total=total,
+            subset=subset,
+            repository_id=DEFAULT_REPOSITORY_ID,
+        )
+
+    return _cached_opds_response(request, build_response, repository_id=DEFAULT_REPOSITORY_ID)
+
+
+@app.get("/repositories/{repository_id}/opds/groups/{group_slug}/subjects/{subgroup_slug}")
+def opds_publication_subgroup_feed_repository(
+    repository_id: str,
+    group_slug: str,
+    subgroup_slug: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    _get_repository_or_404(repository_id)
+    group = publication_group_by_slug(group_slug)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Publication group not found")
+    subgroup = next((item for item in list_subgroups_for_group(group.slug) if item["slug"] == subgroup_slug), None)
+    if subgroup is None:
+        raise HTTPException(status_code=404, detail="Publication subgroup not found")
+
+    def build_response() -> dict:
+        total, subset = store.page_by_publication_subgroup_slug(
+            group_slug=group.slug,
+            subgroup_slug=subgroup_slug,
+            page=page,
+            page_size=page_size,
+            repository_id=repository_id,
+        )
+        return _build_feed_response(
+            request=request,
+            title=f"Group: {group.title} / {subgroup['title']}",
+            path=f"/repositories/{repository_id}/opds/groups/{group.slug}/subjects/{subgroup_slug}",
             page=page,
             page_size=page_size,
             total=total,
             subset=subset,
             repository_id=repository_id,
         )
-        response = _attach_language_facets(
-            request=request,
-            response=response,
-            language_counts=store.list_language_counts(repository_id=repository_id),
-            repository_id=repository_id,
-        )
-        return _attach_browse_facets(request=request, response=response, repository_id=repository_id)
 
     return _cached_opds_response(request, build_response, repository_id=repository_id)
 

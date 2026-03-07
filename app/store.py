@@ -12,7 +12,13 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql import func
 
 from app.models import NormalizedPublication
-from app.publication_groups import group_slugs_for_subject_names, list_publication_groups, publication_group_by_slug
+from app.publication_groups import (
+    group_slugs_for_subject_names,
+    list_publication_groups,
+    list_subgroups_for_group,
+    publication_group_by_slug,
+    subgroup_memberships_for_subject_names,
+)
 from app.subject_aliases import canonicalize_subject_term
 from app.subject_authorities import resolve_lcc, resolve_lcsh, resolve_thema
 from app.subject_categories import classify_subject_category
@@ -169,6 +175,18 @@ class PublicationGroupMembershipRow(Base):
     publication_id: Mapped[str] = mapped_column(String(512), primary_key=True)
     repository_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     group_slug: Mapped[str] = mapped_column(String(128), primary_key=True)
+
+
+class PublicationSubgroupMembershipRow(Base):
+    __tablename__ = "publication_subgroup_memberships"
+    __table_args__ = (
+        Index("ix_publication_subgroup_memberships_repository_group_subgroup", "repository_id", "group_slug", "subgroup_slug"),
+    )
+
+    publication_id: Mapped[str] = mapped_column(String(512), primary_key=True)
+    repository_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    group_slug: Mapped[str] = mapped_column(String(128), primary_key=True)
+    subgroup_slug: Mapped[str] = mapped_column(String(256), primary_key=True)
 
 
 class HarvestCheckpointRow(Base):
@@ -466,6 +484,12 @@ class PublicationStore:
         return [{"group_slug": slug} for slug in group_slugs]
 
     @staticmethod
+    def _normalized_subgroup_rows(normalized_subjects: list[dict[str, str]]) -> list[dict[str, str]]:
+        subject_names = [item["subject_name"] for item in normalized_subjects if isinstance(item.get("subject_name"), str)]
+        memberships = sorted(subgroup_memberships_for_subject_names(subject_names))
+        return [{"group_slug": group_slug, "subgroup_slug": subgroup_slug} for group_slug, subgroup_slug in memberships]
+
+    @staticmethod
     def _replace_publication_subject_categories(
         session: Session,
         *,
@@ -515,6 +539,33 @@ class PublicationStore:
                         group_slug=item["group_slug"],
                     )
                     for item in normalized_groups
+                ]
+            )
+
+    @staticmethod
+    def _replace_publication_subgroup_memberships(
+        session: Session,
+        *,
+        repository_id: str,
+        publication_id: str,
+        normalized_subgroups: list[dict[str, str]],
+    ) -> None:
+        session.execute(
+            PublicationSubgroupMembershipRow.__table__.delete().where(
+                PublicationSubgroupMembershipRow.repository_id == repository_id,
+                PublicationSubgroupMembershipRow.publication_id == publication_id,
+            )
+        )
+        if normalized_subgroups:
+            session.add_all(
+                [
+                    PublicationSubgroupMembershipRow(
+                        publication_id=publication_id,
+                        repository_id=repository_id,
+                        group_slug=item["group_slug"],
+                        subgroup_slug=item["subgroup_slug"],
+                    )
+                    for item in normalized_subgroups
                 ]
             )
 
@@ -575,6 +626,7 @@ class PublicationStore:
         normalized_subjects = self._normalized_subject_rows(pub.subjects)
         normalized_categories = self._normalized_category_rows(normalized_subjects)
         normalized_groups = self._normalized_group_rows(normalized_subjects)
+        normalized_subgroups = self._normalized_subgroup_rows(normalized_subjects)
         normalized_authorities = self._normalized_subject_authority_rows(normalized_subjects)
         payload = {
             "publication_id": storage_publication_id,
@@ -634,6 +686,12 @@ class PublicationStore:
                 publication_id=storage_publication_id,
                 normalized_groups=normalized_groups,
             )
+            self._replace_publication_subgroup_memberships(
+                session,
+                repository_id=repository_id,
+                publication_id=storage_publication_id,
+                normalized_subgroups=normalized_subgroups,
+            )
             session.commit()
 
     def backfill_publication_subjects(
@@ -675,6 +733,7 @@ class PublicationStore:
                         normalized_subjects = self._normalized_subject_rows(subjects)
                         normalized_categories = self._normalized_category_rows(normalized_subjects)
                         normalized_groups = self._normalized_group_rows(normalized_subjects)
+                        normalized_subgroups = self._normalized_subgroup_rows(normalized_subjects)
                         normalized_authorities = self._normalized_subject_authority_rows(normalized_subjects)
                         self._replace_publication_subjects(
                             session,
@@ -693,6 +752,12 @@ class PublicationStore:
                             repository_id=repository_id,
                             publication_id=publication_id,
                             normalized_groups=normalized_groups,
+                        )
+                        self._replace_publication_subgroup_memberships(
+                            session,
+                            repository_id=repository_id,
+                            publication_id=publication_id,
+                            normalized_subgroups=normalized_subgroups,
                         )
                         session.execute(
                             PublicationRow.__table__.update()
@@ -2210,6 +2275,91 @@ class PublicationStore:
             rows = session.scalars(statement).all()
             return total, [self._to_publication(row) for row in rows]
 
+    def list_publication_subgroup_counts(
+        self,
+        *,
+        group_slug: str,
+        repository_id: str = "default",
+    ) -> list[dict[str, str | int]]:
+        group = publication_group_by_slug(group_slug)
+        if group is None:
+            return []
+        with self._session() as session:
+            rows = session.execute(
+                select(PublicationSubgroupMembershipRow.subgroup_slug, sqla_func.count(PublicationSubgroupMembershipRow.publication_id))
+                .where(
+                    PublicationSubgroupMembershipRow.repository_id == repository_id,
+                    PublicationSubgroupMembershipRow.group_slug == group.slug,
+                )
+                .group_by(PublicationSubgroupMembershipRow.subgroup_slug)
+            ).all()
+        count_by_subgroup_slug = {
+            str(subgroup_slug): int(count)
+            for subgroup_slug, count in rows
+            if isinstance(subgroup_slug, str)
+        }
+        out: list[dict[str, str | int]] = []
+        for subgroup in list_subgroups_for_group(group.slug):
+            out.append(
+                {
+                    "slug": subgroup["slug"],
+                    "title": subgroup["title"],
+                    "count": count_by_subgroup_slug.get(subgroup["slug"], 0),
+                }
+            )
+        return out
+
+    def page_by_publication_subgroup_slug(
+        self,
+        *,
+        group_slug: str,
+        subgroup_slug: str,
+        page: int,
+        page_size: int,
+        repository_id: str = "default",
+    ) -> tuple[int, list[NormalizedPublication]]:
+        group = publication_group_by_slug(group_slug)
+        if group is None:
+            return 0, []
+        valid_subgroups = {item["slug"] for item in list_subgroups_for_group(group.slug)}
+        normalized_subgroup_slug = (subgroup_slug or "").strip().casefold()
+        if normalized_subgroup_slug not in valid_subgroups:
+            return 0, []
+        offset = (page - 1) * page_size
+        with self._session() as session:
+            total = int(
+                session.scalar(
+                    select(sqla_func.count(sqla_func.distinct(PublicationSubgroupMembershipRow.publication_id)))
+                    .select_from(PublicationSubgroupMembershipRow)
+                    .where(
+                        PublicationSubgroupMembershipRow.repository_id == repository_id,
+                        PublicationSubgroupMembershipRow.group_slug == group.slug,
+                        PublicationSubgroupMembershipRow.subgroup_slug == normalized_subgroup_slug,
+                    )
+                )
+                or 0
+            )
+            statement = (
+                select(PublicationRow)
+                .join(
+                    PublicationSubgroupMembershipRow,
+                    and_(
+                        PublicationSubgroupMembershipRow.publication_id == PublicationRow.publication_id,
+                        PublicationSubgroupMembershipRow.repository_id == PublicationRow.repository_id,
+                    ),
+                )
+                .where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationSubgroupMembershipRow.group_slug == group.slug,
+                    PublicationSubgroupMembershipRow.subgroup_slug == normalized_subgroup_slug,
+                )
+                .order_by(PublicationRow.source_publication_id.asc(), PublicationRow.publication_id.asc())
+                .offset(offset)
+                .limit(page_size)
+            )
+            rows = session.scalars(statement).all()
+            return total, [self._to_publication(row) for row in rows]
+
     def count(self, repository_id: str = "default") -> int:
         with self._session() as session:
             return int(
@@ -2221,15 +2371,18 @@ class PublicationStore:
 
     def clear(self, repository_id: str | None = None) -> None:
         with self._session() as session:
+            subgroup_statement = PublicationSubgroupMembershipRow.__table__.delete()
             group_statement = PublicationGroupMembershipRow.__table__.delete()
             category_statement = PublicationSubjectCategoryRow.__table__.delete()
             subject_statement = PublicationSubjectRow.__table__.delete()
             statement = PublicationRow.__table__.delete()
             if repository_id is not None:
+                subgroup_statement = subgroup_statement.where(PublicationSubgroupMembershipRow.repository_id == repository_id)
                 group_statement = group_statement.where(PublicationGroupMembershipRow.repository_id == repository_id)
                 category_statement = category_statement.where(PublicationSubjectCategoryRow.repository_id == repository_id)
                 subject_statement = subject_statement.where(PublicationSubjectRow.repository_id == repository_id)
                 statement = statement.where(PublicationRow.repository_id == repository_id)
+            session.execute(subgroup_statement)
             session.execute(group_statement)
             session.execute(category_statement)
             session.execute(subject_statement)
@@ -2241,6 +2394,12 @@ class PublicationStore:
             return 0
         storage_ids = [self._storage_publication_id(repository_id, publication_id) for publication_id in publication_ids]
         with self._session() as session:
+            session.execute(
+                PublicationSubgroupMembershipRow.__table__.delete().where(
+                    PublicationSubgroupMembershipRow.repository_id == repository_id,
+                    PublicationSubgroupMembershipRow.publication_id.in_(storage_ids),
+                )
+            )
             session.execute(
                 PublicationGroupMembershipRow.__table__.delete().where(
                     PublicationGroupMembershipRow.repository_id == repository_id,
@@ -2313,6 +2472,12 @@ class PublicationStore:
                     PublicationRow.repository_id == repository_id,
                     PublicationRow.identifier.is_not(None),
                     sqla_func.lower(PublicationRow.identifier).like(f"{normalized_prefix}%"),
+                )
+            )
+            session.execute(
+                PublicationSubgroupMembershipRow.__table__.delete().where(
+                    PublicationSubgroupMembershipRow.repository_id == repository_id,
+                    PublicationSubgroupMembershipRow.publication_id.in_(matching_publication_ids),
                 )
             )
             session.execute(
