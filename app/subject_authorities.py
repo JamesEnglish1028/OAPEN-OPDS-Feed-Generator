@@ -396,6 +396,26 @@ def _canonical_key(subject_name: str) -> str:
     return subject_lookup_key(canonical)
 
 
+def _contains_key_term(container_key: str, candidate_key: str) -> bool:
+    if not container_key or not candidate_key:
+        return False
+    if container_key == candidate_key:
+        return True
+    if container_key.startswith(f"{candidate_key} "):
+        return True
+    if container_key.endswith(f" {candidate_key}"):
+        return True
+    return f" {candidate_key} " in container_key
+
+
+def _best_partial_match_key(container_key: str, available_keys: list[str]) -> str | None:
+    matches = [key for key in available_keys if _contains_key_term(container_key, key)]
+    if not matches:
+        return None
+    matches.sort(key=len, reverse=True)
+    return matches[0]
+
+
 @lru_cache(maxsize=32768)
 def _resolve_lcc_cached(key: str) -> tuple[tuple[str, str], ...] | None:
     if not key:
@@ -403,6 +423,11 @@ def _resolve_lcc_cached(key: str) -> tuple[tuple[str, str], ...] | None:
     direct = LCC_SUBJECT_MAP.get(key)
     if direct:
         return _freeze_mapping(direct)
+    partial_key = _best_partial_match_key(key, list(LCC_SUBJECT_MAP.keys()))
+    if partial_key:
+        partial = LCC_SUBJECT_MAP.get(partial_key)
+        if partial:
+            return _freeze_mapping(partial)
     category = classify_subject_category(key)
     if not category:
         return None
@@ -418,6 +443,11 @@ def _resolve_lcsh_cached(key: str) -> tuple[tuple[tuple[str, str], ...], ...]:
     direct = LCSH_SUBJECT_MAP.get(key)
     if direct:
         return tuple(_freeze_mapping(item) for item in direct)
+    partial_key = _best_partial_match_key(key, list(LCSH_SUBJECT_MAP.keys()))
+    if partial_key:
+        partial = LCSH_SUBJECT_MAP.get(partial_key, [])
+        if partial:
+            return tuple(_freeze_mapping(item) for item in partial)
     category = classify_subject_category(key)
     if not category:
         return tuple()
@@ -446,6 +476,9 @@ def _resolve_thema_cached(key: str) -> tuple[tuple[tuple[str, str], ...], ...]:
 
     if key:
         _append(THEMA_STARTER_MAP.get(key, []))
+        partial_key = _best_partial_match_key(key, list(THEMA_STARTER_MAP.keys()))
+        if partial_key and partial_key != key:
+            _append(THEMA_STARTER_MAP.get(partial_key, []))
 
     category = classify_subject_category(key)
     category_key = ""

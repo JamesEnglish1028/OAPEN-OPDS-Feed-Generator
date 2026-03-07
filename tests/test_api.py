@@ -922,6 +922,51 @@ def test_subjects_preserve_source_fidelity_while_including_mapped_authorities(tm
     assert "The arts" in names
 
 
+def test_subject_compound_history_terms_include_history_authority_mappings(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "subject_history_compound_case.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "publications": [
+                    {
+                        "id": "subject-history-compound-1",
+                        "title": "Subject History Compound Demo",
+                        "subjects": [
+                            "History:Intellectual History",
+                            "History: European History",
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+
+    publication = client.get("/publications/subject-history-compound-1")
+    assert publication.status_code == 200
+    metadata = publication.json()["metadata"]
+    subjects = [item for item in metadata.get("subjects", []) if isinstance(item, dict)]
+    names = {str(item.get("name", "")) for item in subjects}
+    assert "History:Intellectual History" in names
+    assert "History: European History" in names
+
+    assert any(
+        item.get("name") == "World History"
+        and item.get("scheme") == "http://id.loc.gov"
+        and item.get("code") == "D"
+        for item in subjects
+    )
+    assert any(
+        item.get("name") == "History"
+        and item.get("scheme") == "http://id.loc.gov/authorities/subjects"
+        for item in subjects
+    )
+
+
 def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:
     _reset_store()
     create_repo = client.put(
