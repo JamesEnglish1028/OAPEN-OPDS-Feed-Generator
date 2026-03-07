@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import re
 from typing import Any
 
 import requests
@@ -396,6 +397,41 @@ def _canonical_key(subject_name: str) -> str:
     return subject_lookup_key(canonical)
 
 
+_COMPOUND_SUBJECT_SPLIT_RE = re.compile(r"[;,|]")
+
+
+def _candidate_subject_keys(subject_name: str) -> list[str]:
+    canonical = canonicalize_subject_term(subject_name).strip()
+    if not canonical:
+        return []
+
+    keys: list[str] = []
+    seen: set[str] = set()
+
+    def _add(value: str) -> None:
+        key = subject_lookup_key(value)
+        if not key or key in seen:
+            return
+        seen.add(key)
+        keys.append(key)
+
+    _add(canonical)
+    for chunk in _COMPOUND_SUBJECT_SPLIT_RE.split(canonical):
+        part = chunk.strip()
+        if not part:
+            continue
+        _add(part)
+
+        if ":" in part:
+            path = [segment.strip() for segment in part.split(":") if segment.strip()]
+            if path:
+                _add(path[0])
+                _add(path[-1])
+                if len(path) > 1:
+                    _add(" ".join(path[:-1]))
+    return keys
+
+
 def _contains_key_term(container_key: str, candidate_key: str) -> bool:
     if not container_key or not candidate_key:
         return False
@@ -507,16 +543,44 @@ def _resolve_thema_cached(key: str) -> tuple[tuple[tuple[str, str], ...], ...]:
 
 
 def resolve_lcc(subject_name: str) -> dict[str, str] | None:
-    key = _canonical_key(subject_name)
-    resolved = _resolve_lcc_cached(key)
-    return _thaw_mapping(resolved) if resolved else None
+    for key in _candidate_subject_keys(subject_name):
+        resolved = _resolve_lcc_cached(key)
+        if resolved:
+            return _thaw_mapping(resolved)
+    return None
 
 
 def resolve_lcsh(subject_name: str) -> list[dict[str, str]]:
-    key = _canonical_key(subject_name)
-    return [_thaw_mapping(item) for item in _resolve_lcsh_cached(key)]
+    mappings: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for key in _candidate_subject_keys(subject_name):
+        for frozen in _resolve_lcsh_cached(key):
+            thawed = _thaw_mapping(frozen)
+            dedupe_key = (
+                thawed.get("scheme", ""),
+                thawed.get("term", ""),
+                thawed.get("code", ""),
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            mappings.append(thawed)
+    return mappings
 
 
 def resolve_thema(subject_name: str) -> list[dict[str, str]]:
-    key = _canonical_key(subject_name)
-    return [_thaw_mapping(item) for item in _resolve_thema_cached(key)]
+    mappings: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for key in _candidate_subject_keys(subject_name):
+        for frozen in _resolve_thema_cached(key):
+            thawed = _thaw_mapping(frozen)
+            dedupe_key = (
+                thawed.get("scheme", ""),
+                thawed.get("term", ""),
+                thawed.get("code", ""),
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            mappings.append(thawed)
+    return mappings

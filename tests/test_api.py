@@ -967,6 +967,57 @@ def test_subject_compound_history_terms_include_history_authority_mappings(tmp_p
     )
 
 
+def test_subject_compound_political_science_terms_include_expected_authorities(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "subject_political_science_compound_case.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "publications": [
+                    {
+                        "id": "subject-political-compound-1",
+                        "title": "Subject Political Compound Demo",
+                        "subjects": [
+                            "Political Science:American Politics",
+                            "Political Science:Political Behavior and Public Opinion",
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+
+    publication = client.get("/publications/subject-political-compound-1")
+    assert publication.status_code == 200
+    metadata = publication.json()["metadata"]
+    subjects = [item for item in metadata.get("subjects", []) if isinstance(item, dict)]
+    names = {str(item.get("name", "")) for item in subjects}
+    assert "Political Science:American Politics" in names
+    assert "Political Science:Political Behavior and Public Opinion" in names
+
+    assert any(
+        item.get("name") == "Political science (General)"
+        and item.get("scheme") == "http://id.loc.gov"
+        and item.get("code") == "JA"
+        for item in subjects
+    )
+    assert any(
+        item.get("name") == "Political science"
+        and item.get("scheme") == "http://id.loc.gov/authorities/subjects"
+        for item in subjects
+    )
+    assert any(
+        item.get("name") == "Political science and theory"
+        and item.get("scheme") == "https://ns.editeur.org/thema/"
+        and item.get("code") == "JPA"
+        for item in subjects
+    )
+
+
 def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:
     _reset_store()
     create_repo = client.put(
