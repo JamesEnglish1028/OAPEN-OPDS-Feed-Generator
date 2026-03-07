@@ -961,10 +961,6 @@ def _build_feed_response(
     end = (page - 1) * page_size + len(subset)
     base_url = str(request.base_url).rstrip("/")
     publications = [_to_opds_publication(pub, base_url=base_url, repository_id=repository_id) for pub in subset]
-    repository = store.get_repository(repository_id)
-    repository_name = repository.name if repository else (
-        DEFAULT_REPOSITORY_NAME if repository_id == DEFAULT_REPOSITORY_ID else repository_id
-    )
     is_default_repository = repository_id == DEFAULT_REPOSITORY_ID
     last_page = max(1, (total + page_size - 1) // page_size) if page_size > 0 else 1
     start_path = "/opds" if is_default_repository else f"/repositories/{repository_id}/opds"
@@ -999,14 +995,11 @@ def _build_feed_response(
 
     return {
         "metadata": {
-            "@type": "http://schema.org/DataFeed",
+            "@type": "https://opds.io/opds-catalog",
             "title": title,
             "numberOfItems": total,
             "itemsPerPage": len(publications),
             "currentPage": page,
-            "repositoryId": repository_id,
-            "repositoryName": repository_name,
-            "isDefaultRepository": is_default_repository,
         },
         "links": links,
         "publications": publications,
@@ -1066,20 +1059,13 @@ def _build_collections_index_response(
         }
         for item in items
     ]
-    repository = store.get_repository(repository_id)
-    repository_name = repository.name if repository else (
-        DEFAULT_REPOSITORY_NAME if repository_id == DEFAULT_REPOSITORY_ID else repository_id
-    )
     return {
         "metadata": {
-            "@type": "http://schema.org/DataFeed",
+            "@type": "https://opds.io/opds-catalog",
             "title": "Collections",
             "numberOfItems": total,
             "itemsPerPage": len(navigation),
             "currentPage": page,
-            "repositoryId": repository_id,
-            "repositoryName": repository_name,
-            "isDefaultRepository": repository_id == DEFAULT_REPOSITORY_ID,
         },
         "links": links,
         "navigation": navigation,
@@ -1140,20 +1126,13 @@ def _build_classifications_index_response(
         }
         for item in items
     ]
-    repository = store.get_repository(repository_id)
-    repository_name = repository.name if repository else (
-        DEFAULT_REPOSITORY_NAME if repository_id == DEFAULT_REPOSITORY_ID else repository_id
-    )
     return {
         "metadata": {
-            "@type": "http://schema.org/DataFeed",
+            "@type": "https://opds.io/opds-catalog",
             "title": "Classifications",
             "numberOfItems": total,
             "itemsPerPage": len(navigation),
             "currentPage": page,
-            "repositoryId": repository_id,
-            "repositoryName": repository_name,
-            "isDefaultRepository": repository_id == DEFAULT_REPOSITORY_ID,
         },
         "links": links,
         "navigation": navigation,
@@ -1211,12 +1190,11 @@ def _build_languages_index_response(
     ]
     return {
         "metadata": {
-            "@type": "http://schema.org/DataFeed",
+            "@type": "https://opds.io/opds-catalog",
             "title": "Languages",
             "numberOfItems": total,
             "itemsPerPage": len(navigation),
             "currentPage": page,
-            "repositoryId": repository_id,
         },
         "links": links,
         "navigation": navigation,
@@ -1277,12 +1255,11 @@ def _build_lcc_index_response(
     ]
     return {
         "metadata": {
-            "@type": "http://schema.org/DataFeed",
+            "@type": "https://opds.io/opds-catalog",
             "title": "LCC Top-Level Subjects",
             "numberOfItems": total,
             "itemsPerPage": len(navigation),
             "currentPage": page,
-            "repositoryId": repository_id,
         },
         "links": links,
         "navigation": navigation,
@@ -1347,20 +1324,13 @@ def _build_subclassifications_index_response(
         }
         for item in items
     ]
-    repository = store.get_repository(repository_id)
-    repository_name = repository.name if repository else (
-        DEFAULT_REPOSITORY_NAME if repository_id == DEFAULT_REPOSITORY_ID else repository_id
-    )
     return {
         "metadata": {
-            "@type": "http://schema.org/DataFeed",
+            "@type": "https://opds.io/opds-catalog",
             "title": f"Sub-Classifications: {category['name']}",
             "numberOfItems": total,
             "itemsPerPage": len(navigation),
             "currentPage": page,
-            "repositoryId": repository_id,
-            "repositoryName": repository_name,
-            "isDefaultRepository": repository_id == DEFAULT_REPOSITORY_ID,
             "classificationSlug": category_slug,
             "classificationName": category["name"],
         },
@@ -1803,7 +1773,6 @@ def list_repositories(request: Request, include_inactive: bool = Query(default=T
         repositories.append(
             {
                 **item.__dict__,
-                "isDefaultRepository": item.repository_id == DEFAULT_REPOSITORY_ID,
                 "publicationCount": store.count(repository_id=item.repository_id),
                 "checkpointCount": len(checkpoints),
                 "sourceDomain": _repository_source_domain(item, checkpoints),
@@ -2893,15 +2862,13 @@ def opds_repository_index(request: Request) -> dict:
                 "type": "application/opds+json",
                 "rel": "subsection",
                 "properties": {
-                    "repositoryId": repository.repository_id,
                     "sourceType": repository.source_type,
-                    "isDefaultRepository": repository.repository_id == DEFAULT_REPOSITORY_ID,
                 },
             }
         )
     return {
         "metadata": {
-            "@type": "http://schema.org/DataFeed",
+            "@type": "https://opds.io/opds-catalog",
             "title": "OPDS Repository Index",
             "numberOfItems": len(links),
         },

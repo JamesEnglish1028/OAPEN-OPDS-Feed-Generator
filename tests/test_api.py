@@ -900,17 +900,12 @@ def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:
     repo_feed = client.get("/repositories/demo-repo/opds?page=1&page_size=10")
     assert repo_feed.status_code == 200
     assert repo_feed.json()["metadata"]["numberOfItems"] == 3
-    assert repo_feed.json()["metadata"]["repositoryId"] == "demo-repo"
-    assert repo_feed.json()["metadata"]["isDefaultRepository"] is False
 
     default_alias = client.get("/opds/default?page=1&page_size=10")
     assert default_alias.status_code == 200
-    assert default_alias.json()["metadata"]["repositoryId"] == "default"
-    assert default_alias.json()["metadata"]["isDefaultRepository"] is True
 
     repo_alias = client.get("/opds/demo-repo?page=1&page_size=10")
     assert repo_alias.status_code == 200
-    assert repo_alias.json()["metadata"]["repositoryId"] == "demo-repo"
 
     index = client.get("/opds/index")
     assert index.status_code == 200
@@ -921,10 +916,8 @@ def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:
     repositories = client.get("/repositories")
     assert repositories.status_code == 200
     repo_entries = {item["repository_id"]: item for item in repositories.json()["repositories"]}
-    assert repo_entries["default"]["isDefaultRepository"] is True
     assert repo_entries["default"]["publicationCount"] == 0
     assert repo_entries["default"]["sourceDomain"] == "oapen.org"
-    assert repo_entries["demo-repo"]["isDefaultRepository"] is False
     assert repo_entries["demo-repo"]["publicationCount"] == 3
     assert repo_entries["demo-repo"]["sourceDomain"] is None
     assert repo_entries["demo-repo"]["feedHref"].endswith("/repositories/demo-repo/opds")
@@ -1028,7 +1021,6 @@ def test_repository_opds_json_ingest_follows_next_and_reuses_feed_features(monke
     assert feed.status_code == 200
     feed_json = feed.json()
     assert feed_json["metadata"]["numberOfItems"] == 2
-    assert feed_json["metadata"]["repositoryId"] == "opds-remote"
     assert "groups" in feed_json
     assert any(link["rel"] == "search" for link in feed_json["links"])
 
