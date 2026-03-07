@@ -821,11 +821,19 @@ def _to_opds_publication(pub, base_url: str | None = None, repository_id: str | 
     seen_subject_entries: set[tuple[str, str, str]] = set()
     for subject_name in normalized_subject_names:
         subject_key = subject_name.casefold()
+        source_entry = {"name": subject_name, "sortAs": _subject_sort_as(subject_name)}
+        source_dedupe_key = (
+            str(source_entry.get("name", "")),
+            "",
+            "",
+        )
+        if source_dedupe_key not in seen_subject_entries:
+            seen_subject_entries.add(source_dedupe_key)
+            enriched_subjects.append(source_entry)
+
         entries = authorities_by_subject_name.get(subject_key, [])
         if not entries:
             entries = _computed_subject_entries_for_subject(subject_name)
-        if not entries:
-            entries = [{"name": subject_name, "sortAs": _subject_sort_as(subject_name)}]
         for entry in entries:
             dedupe_key = (
                 str(entry.get("name", "")),

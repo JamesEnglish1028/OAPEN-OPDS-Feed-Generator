@@ -886,6 +886,42 @@ def test_subjects_emit_authorities_without_explicit_backfill(tmp_path) -> None:
     assert any(item.get("scheme") == "https://ns.editeur.org/thema/" and item.get("code") == "JPA" for item in subjects)
 
 
+def test_subjects_preserve_source_fidelity_while_including_mapped_authorities(tmp_path) -> None:
+    _reset_store()
+    payload_path = tmp_path / "subject_fidelity_case.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "publications": [
+                    {
+                        "id": "subject-fidelity-1",
+                        "title": "Subject Fidelity Demo",
+                        "subjects": [
+                            "PERFORMING ARTS / Film / Genres / Horror",
+                            "PERFORMING ARTS / Film / History & Criticism",
+                            "PERFORMING ARTS / Film / General",
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ingest = client.post("/ingest/json", json={"path": str(payload_path)})
+    assert ingest.status_code == 200
+
+    publication = client.get("/publications/subject-fidelity-1")
+    assert publication.status_code == 200
+    metadata = publication.json()["metadata"]
+    subjects = [item for item in metadata.get("subjects", []) if isinstance(item, dict)]
+    names = {str(item.get("name", "")) for item in subjects}
+    assert "PERFORMING ARTS / Film / Genres / Horror" in names
+    assert "PERFORMING ARTS / Film / History & Criticism" in names
+    assert "PERFORMING ARTS / Film / General" in names
+    assert "The arts" in names
+
+
 def test_repository_scoped_ingest_and_feed_isolated_from_default() -> None:
     _reset_store()
     create_repo = client.put(
