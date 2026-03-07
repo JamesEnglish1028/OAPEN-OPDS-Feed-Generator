@@ -11,6 +11,7 @@
     const maintenanceEmpty = document.getElementById("maintenance-empty");
     const maintenanceSelected = document.getElementById("maintenance-selected");
     const maintenanceSelectedName = document.getElementById("maintenance-selected-name");
+    const maintenanceRebuildFeeds = document.getElementById("maintenance-rebuild-feeds");
     const maintenanceReindexSubjects = document.getElementById("maintenance-reindex-subjects");
     const maintenanceReindexAuthorities = document.getElementById("maintenance-reindex-authorities");
     const maintenanceInvalidateRepoCache = document.getElementById("maintenance-invalidate-repo-cache");
@@ -403,6 +404,7 @@
         maintenanceEmpty.hidden = false;
         maintenanceSelected.hidden = true;
         maintenanceSelectedName.textContent = "";
+        maintenanceRebuildFeeds.disabled = true;
         maintenanceReindexSubjects.disabled = true;
         maintenanceReindexAuthorities.disabled = true;
         maintenanceInvalidateRepoCache.disabled = true;
@@ -413,6 +415,7 @@
       maintenanceEmpty.hidden = true;
       maintenanceSelected.hidden = false;
       maintenanceSelectedName.textContent = repo.name + " (" + repo.repository_id + ")";
+      maintenanceRebuildFeeds.disabled = false;
       maintenanceReindexSubjects.disabled = false;
       maintenanceReindexAuthorities.disabled = false;
       maintenanceInvalidateRepoCache.disabled = false;
@@ -591,6 +594,93 @@
       showActionResponse("Reindex Subject Authorities", response, data);
       if (response.ok) {
         await refreshRepositoriesSilently(repositoryId);
+      }
+    }
+
+    async function backfillSubjectsByOffset(repositoryId, batchSize) {
+      let offset = 0;
+      let processed = 0;
+      while (true) {
+        const response = await fetch("/repositories/" + encodeURIComponent(repositoryId) + "/backfill/subjects", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ batch_size: Math.floor(batchSize), offset: offset }),
+        });
+        const data = await readJson(response);
+        showActionResponse("Rebuild Feed Derivations · Subjects", response, data);
+        if (!response.ok) {
+          throw new Error("Subject reindex failed.");
+        }
+        processed += Number(data && data.processed_publications ? data.processed_publications : 0);
+        if (!data || data.has_more === false) {
+          return processed;
+        }
+        offset += Math.floor(batchSize);
+      }
+    }
+
+    async function backfillSubjectAuthoritiesByOffset(repositoryId, batchSize) {
+      let offset = 0;
+      let processed = 0;
+      while (true) {
+        const response = await fetch("/repositories/" + encodeURIComponent(repositoryId) + "/backfill/subject-authorities", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ batch_size: Math.floor(batchSize), offset: offset }),
+        });
+        const data = await readJson(response);
+        showActionResponse("Rebuild Feed Derivations · Subject Authorities", response, data);
+        if (!response.ok) {
+          throw new Error("Subject authority reindex failed.");
+        }
+        processed += Number(data && data.processed_publications ? data.processed_publications : 0);
+        if (!data || data.has_more === false) {
+          return processed;
+        }
+        offset += Math.floor(batchSize);
+      }
+    }
+
+    async function rebuildFeedDerivations(explicitRepositoryId) {
+      const repositoryId = resolveRepositoryId(explicitRepositoryId, repoSelect.value);
+      if (!repositoryId) {
+        show({ error: "Select a repository first." });
+        return;
+      }
+      const batchInput = window.prompt("Rebuild batch size per request (1-5000):", "500");
+      if (batchInput === null) {
+        return;
+      }
+      const batchSize = Number(batchInput.trim() || "500");
+      if (!Number.isFinite(batchSize) || batchSize < 1 || batchSize > 5000) {
+        show({ error: "Batch size must be between 1 and 5000." });
+        return;
+      }
+      const confirmed = window.confirm(
+        "Rebuild all feed derivations for '" + repositoryId + "'?\n\nThis runs:\n1) Reindex Subjects\n2) Reindex Subject Authorities\n3) Invalidate Repo Cache"
+      );
+      if (!confirmed) {
+        return;
+      }
+      maintenanceRebuildFeeds.disabled = true;
+      try {
+        const subjectsProcessed = await backfillSubjectsByOffset(repositoryId, batchSize);
+        const authoritiesProcessed = await backfillSubjectAuthoritiesByOffset(repositoryId, batchSize);
+        await invalidateCache(repositoryId);
+        subjectBackfillCursors[repositoryId] = "";
+        await refreshRepositoriesSilently(repositoryId);
+        show({
+          action: "Rebuild Feed Derivations",
+          repository_id: repositoryId,
+          subjects_processed: subjectsProcessed,
+          subject_authorities_processed: authoritiesProcessed,
+          cache_invalidated: true,
+        });
+        setHarvestResult(true, "Feed Derivations Rebuilt");
+      } finally {
+        if (selectedRepository && selectedRepository.repository_id === repositoryId) {
+          maintenanceRebuildFeeds.disabled = false;
+        }
       }
     }
 
@@ -859,6 +949,13 @@
         return;
       }
       backfillSubjects(selectedRepository.repository_id).catch((error) => show({ error: String(error) }));
+    });
+    maintenanceRebuildFeeds.addEventListener("click", () => {
+      if (!selectedRepository) {
+        show({ error: "Select a repository first." });
+        return;
+      }
+      rebuildFeedDerivations(selectedRepository.repository_id).catch((error) => show({ error: String(error) }));
     });
     maintenanceReindexAuthorities.addEventListener("click", () => {
       if (!selectedRepository) {
