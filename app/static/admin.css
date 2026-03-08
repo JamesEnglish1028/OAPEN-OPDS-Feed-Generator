@@ -125,6 +125,21 @@
       font-size: 1rem;
       letter-spacing: 0.02em;
     }
+    .guide-card h2 {
+      margin-bottom: 10px;
+    }
+    .guide-list {
+      margin: 0;
+      padding-left: 18px;
+      display: grid;
+      gap: 8px;
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    .guide-list code {
+      font-size: 12px;
+    }
     label {
       display: block;
       font-size: 12px;

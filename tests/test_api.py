@@ -1313,6 +1313,7 @@ def test_admin_ui_renders_repository_and_opds_json_controls() -> None:
     assert "text/html" in response.headers["content-type"]
     body = response.text
     assert "Multi-Repository OPDS Admin" in body
+    assert "How To Guide" in body
     assert "/repositories/" in body
     assert "/ingest/opds-json" in body
     assert "Rebuild Feed Derivations" in body
