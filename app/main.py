@@ -4095,31 +4095,31 @@ def admin_invalidate_cache(request: CacheInvalidateRequest) -> dict:
 
 @app.post("/admin/repositories/migrate-data")
 def admin_migrate_repository_data(request: RepositoryDataMigrationRequest) -> dict:
-    source_repository_id = request.source_repository_id.strip()
-    target_repository_id = request.target_repository_id.strip()
-    if not source_repository_id or not target_repository_id:
-        raise HTTPException(status_code=400, detail="source_repository_id and target_repository_id are required")
-    if source_repository_id == target_repository_id:
-        raise HTTPException(status_code=400, detail="source_repository_id and target_repository_id must differ")
-
-    source_repository = _get_repository_or_404(source_repository_id)
-    target_repository = store.get_repository(target_repository_id)
-    if target_repository is None:
-        target_name = request.target_repository_name.strip() if isinstance(request.target_repository_name, str) and request.target_repository_name.strip() else target_repository_id
-        store.upsert_repository(
-            RepositoryConfig(
-                repository_id=target_repository_id,
-                source_type=request.target_source_type,
-                name=target_name,
-                config=request.target_config,
-                is_active=True,
-                updated_at="",
-                created_at="",
-            )
-        )
-        target_repository = _get_repository_or_404(target_repository_id)
-
     try:
+        source_repository_id = request.source_repository_id.strip()
+        target_repository_id = request.target_repository_id.strip()
+        if not source_repository_id or not target_repository_id:
+            raise HTTPException(status_code=400, detail="source_repository_id and target_repository_id are required")
+        if source_repository_id == target_repository_id:
+            raise HTTPException(status_code=400, detail="source_repository_id and target_repository_id must differ")
+
+        source_repository = _get_repository_or_404(source_repository_id)
+        target_repository = store.get_repository(target_repository_id)
+        if target_repository is None:
+            target_name = request.target_repository_name.strip() if isinstance(request.target_repository_name, str) and request.target_repository_name.strip() else target_repository_id
+            store.upsert_repository(
+                RepositoryConfig(
+                    repository_id=target_repository_id,
+                    source_type=request.target_source_type,
+                    name=target_name,
+                    config=request.target_config,
+                    is_active=True,
+                    updated_at="",
+                    created_at="",
+                )
+            )
+            target_repository = _get_repository_or_404(target_repository_id)
+
         result = store.migrate_repository_data(
             source_repository_id=source_repository_id,
             target_repository_id=target_repository_id,
