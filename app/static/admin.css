@@ -149,6 +149,9 @@
       z-index: 1000;
       padding: 16px;
     }
+    .modal-backdrop[hidden] {
+      display: none !important;
+    }
     .modal-card {
       width: min(1100px, 96vw);
       max-height: 92vh;
