@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+import time
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from pathlib import Path
@@ -104,22 +107,54 @@ def iter_json_records(path: str) -> Iterator[dict[str, Any]]:
 
 
 def iter_json_records_from_url(url: str, timeout_seconds: int = 120) -> Iterator[dict[str, Any]]:
-    with requests.get(url, timeout=timeout_seconds, stream=True) as response:
-        response.raise_for_status()
-        response.raw.decode_content = True
-        found_any = False
-        for item in ijson.items(response.raw, "publications.item"):
-            if isinstance(item, dict):
-                found_any = True
-                yield item
-        if found_any:
-            return
+    # Large remote JSON feeds can fail mid-stream (e.g., IncompleteRead) in hosted environments.
+    # Download to a temp file with retry/resume, then parse from disk to avoid memory spikes.
+    max_attempts = 8
+    backoff_seconds = 2
+    temp_path: str | None = None
 
-    response = requests.get(url, timeout=timeout_seconds)
-    response.raise_for_status()
-    payload = response.json()
-    for record in _extract_records(payload):
-        yield record
+    try:
+        with tempfile.NamedTemporaryFile(prefix="opds-json-url-", suffix=".json", delete=False) as tmp:
+            temp_path = tmp.name
+
+        downloaded_bytes = 0
+        attempt = 0
+        while attempt < max_attempts:
+            attempt += 1
+            headers: dict[str, str] = {}
+            mode = "wb"
+            if downloaded_bytes > 0:
+                headers["Range"] = f"bytes={downloaded_bytes}-"
+                mode = "ab"
+
+            try:
+                with requests.get(url, timeout=timeout_seconds, stream=True, headers=headers) as response:
+                    response.raise_for_status()
+                    status = response.status_code
+                    if downloaded_bytes > 0 and status == 200:
+                        # Server ignored Range; restart from scratch.
+                        downloaded_bytes = 0
+                        mode = "wb"
+                    with open(temp_path, mode) as handle:
+                        for chunk in response.iter_content(chunk_size=1024 * 256):
+                            if not chunk:
+                                continue
+                            handle.write(chunk)
+                            downloaded_bytes += len(chunk)
+                break
+            except Exception:
+                if attempt >= max_attempts:
+                    raise
+                time.sleep(backoff_seconds)
+                backoff_seconds = min(backoff_seconds * 2, 20)
+
+        yield from iter_json_records(temp_path)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 
 def load_json_payload_from_url(url: str, timeout_seconds: int = 120) -> Any:
