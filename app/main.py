@@ -1792,6 +1792,11 @@ def admin_ui() -> FileResponse:
     return FileResponse(STATIC_DIR / "admin.html")
 
 
+@app.get("/admin/stats")
+def admin_stats_ui() -> FileResponse:
+    return FileResponse(STATIC_DIR / "repo-stats.html")
+
+
 @app.get("/health")
 def health() -> dict:
     scheduler_enabled = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
@@ -4207,6 +4212,25 @@ def classification_stats(
         "displayable_facet_count": stats["displayable_facet_count"],
         "top_subjects": stats["top_subjects"],
     }
+
+
+@app.get("/repositories/{repository_id}/stats")
+def repository_stats(
+    repository_id: str,
+    request: Request,
+    top_limit: int = Query(default=25, ge=1, le=500),
+) -> dict:
+    repository = _get_repository_or_404(repository_id)
+
+    def _build() -> dict:
+        stats = store.repository_statistics(repository_id=repository_id, top_limit=top_limit)
+        return {
+            "repository_id": repository.repository_id,
+            "repository_name": repository.name,
+            **stats,
+        }
+
+    return _cached_opds_response(request, _build, repository_id=repository_id)
 
 
 @app.get("/repositories/{repository_id}/classification-categories/stats")

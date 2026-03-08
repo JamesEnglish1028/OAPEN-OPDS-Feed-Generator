@@ -2744,6 +2744,296 @@ class PublicationStore:
             session.commit()
             return int(result.rowcount or 0)
 
+    @staticmethod
+    def _normalize_publication_type_label(value: str) -> str:
+        text = (value or "").strip()
+        if not text:
+            return ""
+        if text.startswith("http://") or text.startswith("https://"):
+            text = text.rstrip("/").rsplit("/", 1)[-1]
+        if text.lower().startswith("schema:"):
+            text = text.split(":", 1)[1]
+        return text.strip()
+
+    @staticmethod
+    def _normalize_author_name(value: str) -> str:
+        return " ".join((value or "").strip().split())
+
+    @staticmethod
+    def _iter_link_types(links: Any) -> list[str]:
+        if not isinstance(links, list):
+            return []
+        out: list[str] = []
+        for link in links:
+            if not isinstance(link, dict):
+                continue
+            type_value = link.get("type")
+            if isinstance(type_value, str):
+                candidate = type_value.strip().lower()
+                if candidate:
+                    out.append(candidate)
+            elif isinstance(type_value, list):
+                for item in type_value:
+                    if isinstance(item, str):
+                        candidate = item.strip().lower()
+                        if candidate:
+                            out.append(candidate)
+        return out
+
+    @staticmethod
+    def _extract_publication_type_labels(raw_payload: Any) -> list[str]:
+        if not isinstance(raw_payload, dict):
+            return []
+        candidates: list[str] = []
+        top_level_type = raw_payload.get("@type")
+        metadata_obj = raw_payload.get("metadata") if isinstance(raw_payload.get("metadata"), dict) else {}
+        metadata_type = metadata_obj.get("@type")
+
+        if isinstance(top_level_type, str):
+            candidates.append(top_level_type)
+        elif isinstance(top_level_type, list):
+            candidates.extend([item for item in top_level_type if isinstance(item, str)])
+        if isinstance(metadata_type, str):
+            candidates.append(metadata_type)
+        elif isinstance(metadata_type, list):
+            candidates.extend([item for item in metadata_type if isinstance(item, str)])
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            label = PublicationStore._normalize_publication_type_label(candidate)
+            if not label:
+                continue
+            key = label.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(label)
+        return normalized
+
+    def repository_statistics(
+        self,
+        repository_id: str = "default",
+        *,
+        top_limit: int = 25,
+    ) -> dict[str, Any]:
+        effective_top_limit = max(1, min(int(top_limit), 500))
+        with self._session() as session:
+            total_publications = int(
+                session.scalar(
+                    select(sqla_func.count())
+                    .select_from(PublicationRow)
+                    .where(PublicationRow.repository_id == repository_id)
+                )
+                or 0
+            )
+            distinct_languages = int(
+                session.scalar(
+                    select(sqla_func.count(sqla_func.distinct(PublicationRow.language))).where(
+                        PublicationRow.repository_id == repository_id,
+                        PublicationRow.language.is_not(None),
+                    )
+                )
+                or 0
+            )
+            distinct_publishers = int(
+                session.scalar(
+                    select(sqla_func.count(sqla_func.distinct(PublicationRow.publisher))).where(
+                        PublicationRow.repository_id == repository_id,
+                        PublicationRow.publisher.is_not(None),
+                        PublicationRow.publisher != "",
+                    )
+                )
+                or 0
+            )
+            distinct_series = int(
+                session.scalar(
+                    select(sqla_func.count(sqla_func.distinct(PublicationRow.series_slug))).where(
+                        PublicationRow.repository_id == repository_id,
+                        PublicationRow.series_slug.is_not(None),
+                    )
+                )
+                or 0
+            )
+            min_year = session.scalar(
+                select(sqla_func.min(PublicationRow.publication_year)).where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.publication_year.is_not(None),
+                )
+            )
+            max_year = session.scalar(
+                select(sqla_func.max(PublicationRow.publication_year)).where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.publication_year.is_not(None),
+                )
+            )
+            language_rows = session.execute(
+                select(PublicationRow.language, sqla_func.count(PublicationRow.publication_id))
+                .where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.language.is_not(None),
+                )
+                .group_by(PublicationRow.language)
+                .order_by(sqla_func.count(PublicationRow.publication_id).desc(), PublicationRow.language.asc())
+            ).all()
+            publisher_rows = session.execute(
+                select(PublicationRow.publisher, sqla_func.count(PublicationRow.publication_id))
+                .where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.publisher.is_not(None),
+                    PublicationRow.publisher != "",
+                )
+                .group_by(PublicationRow.publisher)
+                .order_by(sqla_func.count(PublicationRow.publication_id).desc(), PublicationRow.publisher.asc())
+                .limit(effective_top_limit)
+            ).all()
+            series_rows = session.execute(
+                select(PublicationRow.series_slug, PublicationRow.series_name, sqla_func.count(PublicationRow.publication_id))
+                .where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.series_slug.is_not(None),
+                )
+                .group_by(PublicationRow.series_slug, PublicationRow.series_name)
+                .order_by(sqla_func.count(PublicationRow.publication_id).desc(), PublicationRow.series_name.asc())
+                .limit(effective_top_limit)
+            ).all()
+            year_rows = session.execute(
+                select(PublicationRow.publication_year, sqla_func.count(PublicationRow.publication_id))
+                .where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.publication_year.is_not(None),
+                )
+                .group_by(PublicationRow.publication_year)
+                .order_by(PublicationRow.publication_year.desc())
+            ).all()
+
+            publication_type_counter: Counter[str] = Counter()
+            format_counter: Counter[str] = Counter()
+            author_counter: Counter[str] = Counter()
+            unique_authors: set[str] = set()
+            ignored_link_types = {"application/opds+json", "application/opds-publication+json"}
+            row_statement = select(
+                PublicationRow.authors_json,
+                PublicationRow.authors_enriched_json,
+                PublicationRow.links_json,
+                PublicationRow.raw_json,
+            ).where(PublicationRow.repository_id == repository_id)
+            for authors_json, authors_enriched_json, links_json, raw_json in session.execute(row_statement):
+                try:
+                    enriched_authors = json.loads(authors_enriched_json or "[]")
+                except json.JSONDecodeError:
+                    enriched_authors = []
+                try:
+                    plain_authors = json.loads(authors_json or "[]")
+                except json.JSONDecodeError:
+                    plain_authors = []
+                try:
+                    links = json.loads(links_json or "[]")
+                except json.JSONDecodeError:
+                    links = []
+                try:
+                    raw_payload = json.loads(raw_json or "{}")
+                except json.JSONDecodeError:
+                    raw_payload = {}
+
+                publication_author_names: set[str] = set()
+                if isinstance(enriched_authors, list):
+                    for item in enriched_authors:
+                        if isinstance(item, dict) and isinstance(item.get("name"), str):
+                            normalized_name = self._normalize_author_name(item["name"])
+                            if normalized_name:
+                                publication_author_names.add(normalized_name)
+                if not publication_author_names and isinstance(plain_authors, list):
+                    for item in plain_authors:
+                        if isinstance(item, str):
+                            normalized_name = self._normalize_author_name(item)
+                            if normalized_name:
+                                publication_author_names.add(normalized_name)
+                for author_name in publication_author_names:
+                    unique_authors.add(author_name)
+                    author_counter[author_name] += 1
+
+                publication_formats: set[str] = set()
+                for link_type in self._iter_link_types(links):
+                    if link_type in ignored_link_types:
+                        continue
+                    publication_formats.add(link_type)
+                for link_type in publication_formats:
+                    format_counter[link_type] += 1
+
+                publication_types = self._extract_publication_type_labels(raw_payload)
+                if not publication_types:
+                    publication_types = ["Unknown"]
+                for publication_type in publication_types:
+                    publication_type_counter[publication_type] += 1
+
+        group_counts = self.list_publication_group_counts(repository_id=repository_id)
+        subgroup_counts = [
+            {
+                "group_slug": group_item["slug"],
+                "group_title": group_item["title"],
+                "subgroups": self.list_publication_subgroup_counts(
+                    group_slug=str(group_item["slug"]),
+                    repository_id=repository_id,
+                ),
+            }
+            for group_item in group_counts
+        ]
+
+        return {
+            "top_limit": effective_top_limit,
+            "totals": {
+                "publications": total_publications,
+                "languages": distinct_languages,
+                "publishers": distinct_publishers,
+                "series": distinct_series,
+                "unique_authors": len(unique_authors),
+                "year_range": {
+                    "min": int(min_year) if min_year is not None else None,
+                    "max": int(max_year) if max_year is not None else None,
+                },
+            },
+            "by_publication_type": [
+                {"type": name, "count": int(count)}
+                for name, count in publication_type_counter.most_common(effective_top_limit)
+            ],
+            "by_format": [
+                {"format": name, "count": int(count)}
+                for name, count in format_counter.most_common(effective_top_limit)
+            ],
+            "by_language": [
+                {"language": str(language), "count": int(count)}
+                for language, count in language_rows
+                if isinstance(language, str) and language.strip()
+            ],
+            "by_publisher": [
+                {"publisher": str(name), "count": int(count)}
+                for name, count in publisher_rows
+                if isinstance(name, str) and name.strip()
+            ],
+            "by_series": [
+                {"slug": str(slug), "name": str(name), "count": int(count)}
+                for slug, name, count in series_rows
+                if isinstance(slug, str) and slug and isinstance(name, str) and name
+            ],
+            "by_publication_year": [
+                {"year": int(year), "count": int(count)}
+                for year, count in year_rows
+                if year is not None
+            ],
+            "authors": {
+                "unique_count": len(unique_authors),
+                "top_authors": [
+                    {"name": name, "count": int(count)}
+                    for name, count in author_counter.most_common(effective_top_limit)
+                ],
+            },
+            "groups": {
+                "top_level": group_counts,
+                "subgroups": subgroup_counts,
+            },
+        }
+
     def clear_checkpoints(self, repository_id: str | None = None) -> None:
         with self._session() as session:
             statement = HarvestCheckpointRow.__table__.delete()
