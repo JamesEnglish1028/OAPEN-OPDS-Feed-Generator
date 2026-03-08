@@ -1753,15 +1753,39 @@ def _root_registry_catalog_entries(request: Request) -> list[dict]:
     for repository in repositories:
         if repository.repository_id == DEFAULT_REPOSITORY_ID:
             continue
-        catalogs.append(
-            {
-                "href": f"{base}/repositories/{repository.repository_id}/opds",
+        config = repository.config if isinstance(repository.config, dict) else {}
+        image_href = None
+        for key in ("image", "image_url", "logo", "logo_url", "icon", "icon_url", "cover", "cover_url"):
+            value = config.get(key)
+            if isinstance(value, str) and value.strip():
+                image_href = value.strip()
+                break
+        image_type = None
+        image_type_value = config.get("image_type")
+        if isinstance(image_type_value, str) and image_type_value.strip():
+            image_type = image_type_value.strip()
+
+        catalog_entry: dict = {
+            "metadata": {
                 "title": repository.name,
-                "type": "application/opds+json",
-                "rel": "http://opds-spec.org/catalog",
+                "identifier": repository.repository_id,
                 "numberOfItems": store.count(repository_id=repository.repository_id),
-                "repositoryId": repository.repository_id,
-            }
+            },
+            "links": [
+                {
+                    "href": f"{base}/repositories/{repository.repository_id}/opds",
+                    "type": "application/opds+json",
+                    "rel": "http://opds-spec.org/catalog",
+                }
+            ],
+        }
+        if image_href:
+            image_entry: dict = {"href": image_href}
+            if image_type:
+                image_entry["type"] = image_type
+            catalog_entry["images"] = [image_entry]
+        catalogs.append(
+            catalog_entry
         )
     return catalogs
 
@@ -2612,9 +2636,13 @@ def opds_registry_search(
             item
             for item in catalogs
             if (
-                search_key in str(item.get("title", "")).casefold()
-                or search_key in str(item.get("href", "")).casefold()
-                or search_key in str(item.get("repositoryId", "")).casefold()
+                search_key in str((item.get("metadata") or {}).get("title", "")).casefold()
+                or search_key in str((item.get("metadata") or {}).get("identifier", "")).casefold()
+                or any(
+                    search_key in str(link.get("href", "")).casefold()
+                    for link in (item.get("links") or [])
+                    if isinstance(link, dict)
+                )
             )
         ]
 
