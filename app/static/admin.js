@@ -52,6 +52,7 @@
     const harvestStatusText = document.getElementById("harvest-status-text");
     const output = document.getElementById("output");
     const subjectBackfillCursors = {};
+    const repositoriesById = {};
     let directoryEntries = [];
     let selectedRepository = null;
     let harvestBusy = false;
@@ -106,6 +107,18 @@
     function resolveRepositoryId(explicitRepositoryId, fallbackValue) {
       const value = explicitRepositoryId || fallbackValue || "";
       return value.trim();
+    }
+
+    function currentHarvestRepository() {
+      const repositoryId = repoSelect.value;
+      if (!repositoryId) {
+        return null;
+      }
+      return repositoriesById[repositoryId] || null;
+    }
+
+    function isOpdsSourceType(sourceType) {
+      return sourceType === "opds-json" || sourceType === "mixed";
     }
 
     function updateSubjectBackfillCursor(repositoryId, data) {
@@ -223,10 +236,13 @@
       const url = harvestUrlInput.value.trim();
       const hasUrl = Boolean(url);
       const hasRepository = Boolean(repoSelect.value);
+      const repository = currentHarvestRepository();
+      const sourceType = repository && typeof repository.source_type === "string" ? repository.source_type : "";
+      const opdsSource = isOpdsSourceType(sourceType);
       const selectedCount = getCheckedDirectoryEntries().length;
       const mode = currentDirectoryImportMode();
       refreshReposManageButton.disabled = harvestBusy;
-      fetchDirectoriesButton.disabled = harvestBusy || !hasUrl;
+      fetchDirectoriesButton.disabled = harvestBusy || !hasUrl || !opdsSource;
       loadCheckpointsButton.disabled = harvestBusy || !hasRepository;
       directorySelectAll.disabled = directoryEntries.length === 0;
 
@@ -253,6 +269,20 @@
           return;
         }
         harvestActionHint.textContent = "Select a repository to run ingest actions.";
+        updateRepoFormButtonState();
+        return;
+      }
+
+      if (!opdsSource) {
+        startHarvestButton.disabled = harvestBusy ? true : false;
+        importAsRepositoriesButton.disabled = true;
+        importIntoRepositoryButton.disabled = true;
+        if (harvestBusy) {
+          harvestActionHint.textContent = "Harvest is running...";
+          updateRepoFormButtonState();
+          return;
+        }
+        harvestActionHint.textContent = "Source type '" + sourceType + "' uses direct ingest only; directory import tools are disabled.";
         updateRepoFormButtonState();
         return;
       }
@@ -470,6 +500,9 @@
     function renderRepositories(payload, preferredRepositoryId) {
       const repositories = payload.repositories || [];
       const selectedRepositoryId = preferredRepositoryId || repoSelect.value;
+      for (const key of Object.keys(repositoriesById)) {
+        delete repositoriesById[key];
+      }
       repoList.innerHTML = "";
       repoSelect.innerHTML = "";
       let detailRepository = null;
@@ -480,6 +513,7 @@
         repoSummary.textContent = "No default repository is currently configured.";
       }
       for (const repo of repositories) {
+        repositoriesById[repo.repository_id] = repo;
         if (!(repo.repository_id in subjectBackfillCursors)) {
           subjectBackfillCursors[repo.repository_id] = "";
         }
@@ -821,18 +855,44 @@
       setHarvestBusy(true, "Harvesting");
       try {
         const repositoryId = repoSelect.value;
-        const body = {
-          url: harvestUrlInput.value.trim(),
+        const repository = currentHarvestRepository();
+        const sourceType = repository && typeof repository.source_type === "string" ? repository.source_type : "opds-json";
+        const configuredUrl = repository && repository.config && typeof repository.config.url === "string" ? repository.config.url.trim() : "";
+        const effectiveUrl = harvestUrlInput.value.trim() || configuredUrl;
+        if (!effectiveUrl) {
+          show({ error: "Enter a source URL in Ingest, or set config.url on the selected repository." });
+          setHarvestResult(false, "Harvest Failed");
+          return;
+        }
+
+        let endpoint = "/repositories/" + encodeURIComponent(repositoryId) + "/ingest/opds-json";
+        let body = {
+          url: effectiveUrl,
           follow_next: harvestFollowNextInput.checked,
           incremental: harvestIncrementalInput.checked,
           timeout_seconds: Number(harvestTimeoutInput.value) || 120,
         };
-        const maxPages = harvestMaxPagesInput.value.trim();
-        const maxRecords = harvestMaxRecordsInput.value.trim();
-        if (maxPages) body.max_pages = Number(maxPages);
-        if (maxRecords) body.max_records = Number(maxRecords);
+        if (sourceType === "json") {
+          endpoint = "/repositories/" + encodeURIComponent(repositoryId) + "/ingest/json-url";
+          body = { url: effectiveUrl };
+        } else if (sourceType === "oai-pmh") {
+          endpoint = "/repositories/" + encodeURIComponent(repositoryId) + "/ingest/oai-pmh";
+          body = {
+            base_url: effectiveUrl,
+            metadata_prefix: repository && repository.config && typeof repository.config.metadata_prefix === "string" ? repository.config.metadata_prefix : "oai_dc",
+            incremental: harvestIncrementalInput.checked,
+          };
+          if (repository && repository.config && typeof repository.config.set_name === "string" && repository.config.set_name.trim()) {
+            body.set_name = repository.config.set_name.trim();
+          }
+        } else {
+          const maxPages = harvestMaxPagesInput.value.trim();
+          const maxRecords = harvestMaxRecordsInput.value.trim();
+          if (maxPages) body.max_pages = Number(maxPages);
+          if (maxRecords) body.max_records = Number(maxRecords);
+        }
 
-        const response = await fetch("/repositories/" + encodeURIComponent(repositoryId) + "/ingest/opds-json", {
+        const response = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -1053,6 +1113,11 @@
       syncDirectoryImportModeUi();
     });
     repoSelect.addEventListener("change", () => {
+      const repository = currentHarvestRepository();
+      const configuredUrl = repository && repository.config && typeof repository.config.url === "string" ? repository.config.url.trim() : "";
+      if (configuredUrl && !harvestUrlInput.value.trim()) {
+        harvestUrlInput.value = configuredUrl;
+      }
       updateDirectoryImportSummary();
       updateHarvestActionState();
     });

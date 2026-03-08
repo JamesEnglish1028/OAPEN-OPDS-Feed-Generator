@@ -39,7 +39,7 @@
       <div class="grid">
         <div class="card">
           <h2>Repository Configuration</h2>
-          <p class="hint">Create or update a repository. Use <code>source_type</code> <code>opds-json</code> for remote OPDS-like feeds.</p>
+          <p class="hint">Create or update a repository. Use <code>source_type</code> <code>opds-json</code> (OPDS feeds), <code>json</code> (large JSON metadata files), or <code>oai-pmh</code> (OAI endpoints).</p>
           <form id="repo-form">
             <div class="row">
               <div>
@@ -216,7 +216,7 @@
           <ul class="guide-list">
             <li><strong>Repository ID</strong>: stable slug like <code>lever-press</code> (no spaces).</li>
             <li><strong>Name</strong>: human readable label.</li>
-            <li><strong>Source Type</strong>: use <code>opds-json</code> for remote OPDS-style sources.</li>
+            <li><strong>Source Type</strong>: <code>opds-json</code> for OPDS feeds, <code>json</code> for metadata JSON URL ingest, <code>oai-pmh</code> for OAI endpoints.</li>
             <li><strong>Config JSON</strong>: usually <code>{"url":"https://..."}</code> for remote sources, otherwise <code>{}</code>.</li>
             <li><strong>Active repository</strong>: leave checked unless parking a repo.</li>
           </ul>
