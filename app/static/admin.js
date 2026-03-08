@@ -1,5 +1,8 @@
     const viewPanels = Array.from(document.querySelectorAll(".view-panel"));
     const viewButtons = Array.from(document.querySelectorAll("[data-view-button]"));
+    const openGuideModalButton = document.getElementById("open-guide-modal");
+    const closeGuideModalButton = document.getElementById("close-guide-modal");
+    const guideModal = document.getElementById("guide-modal");
     const DEFAULT_REPOSITORY_ID = "default";
     const repoList = document.getElementById("repo-list");
     const repoForm = document.getElementById("repo-form");
@@ -83,6 +86,20 @@
         const buttonView = button.getAttribute("data-view-button");
         button.classList.toggle("active", buttonView === viewName);
       }
+    }
+
+    function openGuideModal() {
+      if (!guideModal) {
+        return;
+      }
+      guideModal.hidden = false;
+    }
+
+    function closeGuideModal() {
+      if (!guideModal) {
+        return;
+      }
+      guideModal.hidden = true;
     }
 
     function resolveRepositoryId(explicitRepositoryId, fallbackValue) {
@@ -987,6 +1004,22 @@
         return;
       }
       deleteRepository(selectedRepository.repository_id).catch((error) => show({ error: String(error) }));
+    });
+    openGuideModalButton.addEventListener("click", () => {
+      openGuideModal();
+    });
+    closeGuideModalButton.addEventListener("click", () => {
+      closeGuideModal();
+    });
+    guideModal.addEventListener("click", (event) => {
+      if (event.target === guideModal) {
+        closeGuideModal();
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && guideModal && !guideModal.hidden) {
+        closeGuideModal();
+      }
     });
     harvestUrlInput.addEventListener("input", () => {
       updateHarvestActionState();

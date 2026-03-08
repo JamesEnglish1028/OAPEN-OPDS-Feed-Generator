@@ -20,63 +20,13 @@
         <h2 class="section-title">Operator Tasks</h2>
         <p class="section-copy">Use these task views to reduce context switching: configure repositories, run ingestion, then perform maintenance.</p>
       </div>
+      <div class="actions">
+        <button type="button" id="open-guide-modal" class="ghost">How To Guide</button>
+      </div>
       <div class="flow-nav" role="tablist" aria-label="Operator task views">
         <button type="button" id="view-repositories" data-view-button="repositories" class="active">Repositories</button>
         <button type="button" id="view-ingest" data-view-button="ingest">Ingest</button>
         <button type="button" id="view-maintenance" data-view-button="maintenance">Maintenance</button>
-      </div>
-    </section>
-
-    <section class="section">
-      <div class="section-head">
-        <div class="section-kicker">Guide</div>
-        <h2 class="section-title">How To Guide</h2>
-        <p class="section-copy">Use this checklist for required fields, button order, and safe operational sequence.</p>
-      </div>
-      <div class="grid">
-        <div class="card guide-card">
-          <h2>1) Create Or Update Repository</h2>
-          <ul class="guide-list">
-            <li><strong>Repository ID</strong>: stable slug like <code>lever-press</code> (no spaces).</li>
-            <li><strong>Name</strong>: human readable label.</li>
-            <li><strong>Source Type</strong>: use <code>opds-json</code> for remote OPDS-style sources.</li>
-            <li><strong>Config JSON</strong>: usually <code>{"url":"https://..."}</code> for remote sources, otherwise <code>{}</code>.</li>
-            <li><strong>Active repository</strong>: leave checked unless parking a repo.</li>
-          </ul>
-          <p class="hint hint-tight">Buttons: <strong>Save Repository</strong> then <strong>Refresh Repository List</strong>.</p>
-        </div>
-        <div class="card guide-card">
-          <h2>2) Ingest Data</h2>
-          <ul class="guide-list">
-            <li>Select the target repository in <strong>Ingest</strong>.</li>
-            <li>Add <strong>Remote Feed URL</strong>.</li>
-            <li>Optional limits: <strong>Max Pages</strong> and <strong>Max Records</strong>.</li>
-            <li>Keep <strong>Follow next</strong> and <strong>Persist checkpoint</strong> enabled for production runs.</li>
-          </ul>
-          <p class="hint hint-tight">Buttons: <strong>Start Harvest</strong> for direct ingest, or <strong>Fetch Directories</strong> then <strong>Create Repositories</strong>/<strong>Import Into Selected Repository</strong>.</p>
-        </div>
-      </div>
-      <div class="grid">
-        <div class="card guide-card">
-          <h2>3) Rebuild Feed Derivations</h2>
-          <ul class="guide-list">
-            <li>Use after mapping/classification logic changes or large correction imports.</li>
-            <li><strong>Rebuild Feed Derivations</strong> runs full sequence:
-              Reindex Subjects - Reindex Subject Authorities - Invalidate Repo Cache.</li>
-            <li>Batch size prompt: start with <code>500</code> on Render; increase only if stable.</li>
-          </ul>
-          <p class="hint hint-tight">If you run manually, do Subjects first, then Subject Authorities.</p>
-        </div>
-        <div class="card guide-card">
-          <h2>4) Safe Maintenance</h2>
-          <ul class="guide-list">
-            <li><strong>Invalidate Repo Cache</strong>: refresh one repository feed cache.</li>
-            <li><strong>Invalidate All Cache</strong>: use after broad global changes.</li>
-            <li><strong>Clear Data</strong>: removes records/checkpoints but keeps repo config.</li>
-            <li><strong>Delete Repository</strong>: removes everything for that repo.</li>
-          </ul>
-          <p class="hint hint-tight">Use Danger Zone only when re-ingesting from scratch or decommissioning a source.</p>
-        </div>
       </div>
     </section>
 
@@ -252,6 +202,61 @@
       </div>
     </section>
   </div>
+
+  <div id="guide-modal" class="modal-backdrop" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="guide-modal-title">
+      <div class="modal-head">
+        <h2 id="guide-modal-title">How To Guide</h2>
+        <button type="button" id="close-guide-modal" class="ghost modal-close">Close</button>
+      </div>
+      <div class="grid">
+        <div class="card guide-card">
+          <h2>1) Create Or Update Repository</h2>
+          <ul class="guide-list">
+            <li><strong>Repository ID</strong>: stable slug like <code>lever-press</code> (no spaces).</li>
+            <li><strong>Name</strong>: human readable label.</li>
+            <li><strong>Source Type</strong>: use <code>opds-json</code> for remote OPDS-style sources.</li>
+            <li><strong>Config JSON</strong>: usually <code>{"url":"https://..."}</code> for remote sources, otherwise <code>{}</code>.</li>
+            <li><strong>Active repository</strong>: leave checked unless parking a repo.</li>
+          </ul>
+          <p class="hint hint-tight">Buttons: <strong>Save Repository</strong> then <strong>Refresh Repository List</strong>.</p>
+        </div>
+        <div class="card guide-card">
+          <h2>2) Ingest Data</h2>
+          <ul class="guide-list">
+            <li>Select the target repository in <strong>Ingest</strong>.</li>
+            <li>Add <strong>Remote Feed URL</strong>.</li>
+            <li>Optional limits: <strong>Max Pages</strong> and <strong>Max Records</strong>.</li>
+            <li>Keep <strong>Follow next</strong> and <strong>Persist checkpoint</strong> enabled for production runs.</li>
+          </ul>
+          <p class="hint hint-tight">Buttons: <strong>Start Harvest</strong> for direct ingest, or <strong>Fetch Directories</strong> then <strong>Create Repositories</strong>/<strong>Import Into Selected Repository</strong>.</p>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="card guide-card">
+          <h2>3) Rebuild Feed Derivations</h2>
+          <ul class="guide-list">
+            <li>Use after mapping/classification logic changes or large correction imports.</li>
+            <li><strong>Rebuild Feed Derivations</strong> runs full sequence:
+              Reindex Subjects - Reindex Subject Authorities - Invalidate Repo Cache.</li>
+            <li>Batch size prompt: start with <code>500</code> on Render; increase only if stable.</li>
+          </ul>
+          <p class="hint hint-tight">If you run manually, do Subjects first, then Subject Authorities.</p>
+        </div>
+        <div class="card guide-card">
+          <h2>4) Safe Maintenance</h2>
+          <ul class="guide-list">
+            <li><strong>Invalidate Repo Cache</strong>: refresh one repository feed cache.</li>
+            <li><strong>Invalidate All Cache</strong>: use after broad global changes.</li>
+            <li><strong>Clear Data</strong>: removes records/checkpoints but keeps repo config.</li>
+            <li><strong>Delete Repository</strong>: removes everything for that repo.</li>
+          </ul>
+          <p class="hint hint-tight">Use Danger Zone only when re-ingesting from scratch or decommissioning a source.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="/static/admin.js" defer></script>
 </body>
 </html>

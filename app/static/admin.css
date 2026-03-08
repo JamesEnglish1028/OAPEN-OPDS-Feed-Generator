@@ -140,6 +140,40 @@
     .guide-list code {
       font-size: 12px;
     }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(31, 41, 51, 0.55);
+      display: grid;
+      place-items: center;
+      z-index: 1000;
+      padding: 16px;
+    }
+    .modal-card {
+      width: min(1100px, 96vw);
+      max-height: 92vh;
+      overflow: auto;
+      background: var(--card);
+      border: 1px solid rgba(217, 203, 176, 0.9);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+    .modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .modal-head h2 {
+      margin: 0;
+      font-size: 1.1rem;
+      font-family: Georgia, "Times New Roman", serif;
+    }
+    .modal-close {
+      white-space: nowrap;
+    }
     label {
       display: block;
       font-size: 12px;
