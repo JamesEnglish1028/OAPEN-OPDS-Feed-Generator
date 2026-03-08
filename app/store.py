@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import Boolean, DateTime, Index, String, Text, and_, create_engine, func as sqla_func, or_, select, text as sqla_text, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql import func
@@ -629,133 +630,136 @@ class PublicationStore:
         if source_repository_id == target_repository_id:
             raise ValueError("source_repository_id and target_repository_id must be different")
 
-        with self._session() as session:
-            source_rows = session.execute(
-                select(PublicationRow.publication_id, PublicationRow.source_publication_id).where(
-                    PublicationRow.repository_id == source_repository_id
-                )
-            ).all()
-            id_mappings: list[tuple[str, str]] = []
-            for old_publication_id, source_publication_id in source_rows:
-                source_id = source_publication_id or old_publication_id
-                new_publication_id = self._storage_publication_id(target_repository_id, source_id)
-                id_mappings.append((str(old_publication_id), str(new_publication_id)))
-
-            target_ids = [new_id for _, new_id in id_mappings]
-            if target_ids:
-                existing_conflicts = session.scalars(
-                    select(PublicationRow.publication_id).where(
-                        PublicationRow.publication_id.in_(target_ids),
-                        PublicationRow.repository_id != source_repository_id,
+        try:
+            with self._session() as session:
+                source_rows = session.execute(
+                    select(PublicationRow.publication_id, PublicationRow.source_publication_id).where(
+                        PublicationRow.repository_id == source_repository_id
                     )
                 ).all()
-                if existing_conflicts:
-                    sample = ", ".join(existing_conflicts[:5])
-                    raise ValueError(f"target repository already contains colliding publication IDs: {sample}")
+                id_mappings: list[tuple[str, str]] = []
+                for old_publication_id, source_publication_id in source_rows:
+                    source_id = source_publication_id or old_publication_id
+                    new_publication_id = self._storage_publication_id(target_repository_id, source_id)
+                    id_mappings.append((str(old_publication_id), str(new_publication_id)))
 
-            moved_subject_rows = 0
-            moved_category_rows = 0
-            moved_group_rows = 0
-            moved_subgroup_rows = 0
-            moved_publication_rows = 0
-            moved_checkpoints = 0
-
-            for old_publication_id, new_publication_id in id_mappings:
-                moved_subject_rows += int(
-                    session.execute(
-                        update(PublicationSubjectRow)
-                        .where(
-                            PublicationSubjectRow.repository_id == source_repository_id,
-                            PublicationSubjectRow.publication_id == old_publication_id,
-                        )
-                        .values(repository_id=target_repository_id, publication_id=new_publication_id)
-                    ).rowcount
-                    or 0
-                )
-                moved_category_rows += int(
-                    session.execute(
-                        update(PublicationSubjectCategoryRow)
-                        .where(
-                            PublicationSubjectCategoryRow.repository_id == source_repository_id,
-                            PublicationSubjectCategoryRow.publication_id == old_publication_id,
-                        )
-                        .values(repository_id=target_repository_id, publication_id=new_publication_id)
-                    ).rowcount
-                    or 0
-                )
-                moved_group_rows += int(
-                    session.execute(
-                        update(PublicationGroupMembershipRow)
-                        .where(
-                            PublicationGroupMembershipRow.repository_id == source_repository_id,
-                            PublicationGroupMembershipRow.publication_id == old_publication_id,
-                        )
-                        .values(repository_id=target_repository_id, publication_id=new_publication_id)
-                    ).rowcount
-                    or 0
-                )
-                moved_subgroup_rows += int(
-                    session.execute(
-                        update(PublicationSubgroupMembershipRow)
-                        .where(
-                            PublicationSubgroupMembershipRow.repository_id == source_repository_id,
-                            PublicationSubgroupMembershipRow.publication_id == old_publication_id,
-                        )
-                        .values(repository_id=target_repository_id, publication_id=new_publication_id)
-                    ).rowcount
-                    or 0
-                )
-                moved_publication_rows += int(
-                    session.execute(
-                        update(PublicationRow)
-                        .where(
-                            PublicationRow.repository_id == source_repository_id,
-                            PublicationRow.publication_id == old_publication_id,
-                        )
-                        .values(repository_id=target_repository_id, publication_id=new_publication_id)
-                    ).rowcount
-                    or 0
-                )
-
-            if move_checkpoints:
-                checkpoints = session.scalars(
-                    select(HarvestCheckpointRow).where(HarvestCheckpointRow.repository_id == source_repository_id)
-                ).all()
-                candidate_keys: dict[str, str] = {}
-                for checkpoint in checkpoints:
-                    old_key = checkpoint.checkpoint_key
-                    prefix = f"{checkpoint.source_type}|{source_repository_id}|"
-                    if old_key.startswith(prefix):
-                        new_key = f"{checkpoint.source_type}|{target_repository_id}|{old_key[len(prefix):]}"
-                    else:
-                        new_key = old_key
-                    candidate_keys[old_key] = new_key
-
-                if candidate_keys:
-                    existing_checkpoint_conflicts = session.scalars(
-                        select(HarvestCheckpointRow.checkpoint_key).where(
-                            HarvestCheckpointRow.checkpoint_key.in_(list(candidate_keys.values())),
-                            HarvestCheckpointRow.repository_id != source_repository_id,
+                target_ids = [new_id for _, new_id in id_mappings]
+                if target_ids:
+                    existing_conflicts = session.scalars(
+                        select(PublicationRow.publication_id).where(
+                            PublicationRow.publication_id.in_(target_ids),
+                            PublicationRow.repository_id != source_repository_id,
                         )
                     ).all()
-                    if existing_checkpoint_conflicts:
-                        sample = ", ".join(existing_checkpoint_conflicts[:5])
-                        raise ValueError(f"target repository already contains colliding checkpoints: {sample}")
+                    if existing_conflicts:
+                        sample = ", ".join(existing_conflicts[:5])
+                        raise ValueError(f"target repository already contains colliding publication IDs: {sample}")
 
-                for checkpoint in checkpoints:
-                    checkpoint.repository_id = target_repository_id
-                    checkpoint.checkpoint_key = candidate_keys.get(checkpoint.checkpoint_key, checkpoint.checkpoint_key)
-                    moved_checkpoints += 1
+                moved_subject_rows = 0
+                moved_category_rows = 0
+                moved_group_rows = 0
+                moved_subgroup_rows = 0
+                moved_publication_rows = 0
+                moved_checkpoints = 0
 
-            session.commit()
-            return {
-                "moved_publications": moved_publication_rows,
-                "moved_subject_rows": moved_subject_rows,
-                "moved_category_rows": moved_category_rows,
-                "moved_group_rows": moved_group_rows,
-                "moved_subgroup_rows": moved_subgroup_rows,
-                "moved_checkpoints": moved_checkpoints,
-            }
+                for old_publication_id, new_publication_id in id_mappings:
+                    moved_subject_rows += int(
+                        session.execute(
+                            update(PublicationSubjectRow)
+                            .where(
+                                PublicationSubjectRow.repository_id == source_repository_id,
+                                PublicationSubjectRow.publication_id == old_publication_id,
+                            )
+                            .values(repository_id=target_repository_id, publication_id=new_publication_id)
+                        ).rowcount
+                        or 0
+                    )
+                    moved_category_rows += int(
+                        session.execute(
+                            update(PublicationSubjectCategoryRow)
+                            .where(
+                                PublicationSubjectCategoryRow.repository_id == source_repository_id,
+                                PublicationSubjectCategoryRow.publication_id == old_publication_id,
+                            )
+                            .values(repository_id=target_repository_id, publication_id=new_publication_id)
+                        ).rowcount
+                        or 0
+                    )
+                    moved_group_rows += int(
+                        session.execute(
+                            update(PublicationGroupMembershipRow)
+                            .where(
+                                PublicationGroupMembershipRow.repository_id == source_repository_id,
+                                PublicationGroupMembershipRow.publication_id == old_publication_id,
+                            )
+                            .values(repository_id=target_repository_id, publication_id=new_publication_id)
+                        ).rowcount
+                        or 0
+                    )
+                    moved_subgroup_rows += int(
+                        session.execute(
+                            update(PublicationSubgroupMembershipRow)
+                            .where(
+                                PublicationSubgroupMembershipRow.repository_id == source_repository_id,
+                                PublicationSubgroupMembershipRow.publication_id == old_publication_id,
+                            )
+                            .values(repository_id=target_repository_id, publication_id=new_publication_id)
+                        ).rowcount
+                        or 0
+                    )
+                    moved_publication_rows += int(
+                        session.execute(
+                            update(PublicationRow)
+                            .where(
+                                PublicationRow.repository_id == source_repository_id,
+                                PublicationRow.publication_id == old_publication_id,
+                            )
+                            .values(repository_id=target_repository_id, publication_id=new_publication_id)
+                        ).rowcount
+                        or 0
+                    )
+
+                if move_checkpoints:
+                    checkpoints = session.scalars(
+                        select(HarvestCheckpointRow).where(HarvestCheckpointRow.repository_id == source_repository_id)
+                    ).all()
+                    candidate_keys: dict[str, str] = {}
+                    for checkpoint in checkpoints:
+                        old_key = checkpoint.checkpoint_key
+                        prefix = f"{checkpoint.source_type}|{source_repository_id}|"
+                        if old_key.startswith(prefix):
+                            new_key = f"{checkpoint.source_type}|{target_repository_id}|{old_key[len(prefix):]}"
+                        else:
+                            new_key = old_key
+                        candidate_keys[old_key] = new_key
+
+                    if candidate_keys:
+                        existing_checkpoint_conflicts = session.scalars(
+                            select(HarvestCheckpointRow.checkpoint_key).where(
+                                HarvestCheckpointRow.checkpoint_key.in_(list(candidate_keys.values())),
+                                HarvestCheckpointRow.repository_id != source_repository_id,
+                            )
+                        ).all()
+                        if existing_checkpoint_conflicts:
+                            sample = ", ".join(existing_checkpoint_conflicts[:5])
+                            raise ValueError(f"target repository already contains colliding checkpoints: {sample}")
+
+                    for checkpoint in checkpoints:
+                        checkpoint.repository_id = target_repository_id
+                        checkpoint.checkpoint_key = candidate_keys.get(checkpoint.checkpoint_key, checkpoint.checkpoint_key)
+                        moved_checkpoints += 1
+
+                session.commit()
+                return {
+                    "moved_publications": moved_publication_rows,
+                    "moved_subject_rows": moved_subject_rows,
+                    "moved_category_rows": moved_category_rows,
+                    "moved_group_rows": moved_group_rows,
+                    "moved_subgroup_rows": moved_subgroup_rows,
+                    "moved_checkpoints": moved_checkpoints,
+                }
+        except SQLAlchemyError as exc:
+            raise ValueError(f"database error during migration: {exc.__class__.__name__}: {exc}") from exc
 
     def upsert(self, pub: NormalizedPublication) -> None:
         repository_id = pub.repository_id or "default"

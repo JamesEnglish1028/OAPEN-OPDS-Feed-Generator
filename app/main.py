@@ -4127,6 +4127,8 @@ def admin_migrate_repository_data(request: RepositoryDataMigrationRequest) -> di
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"migration failed: {exc.__class__.__name__}: {exc}") from exc
 
     _invalidate_opds_cache(source_repository_id)
     _invalidate_opds_cache(target_repository_id)
