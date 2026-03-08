@@ -141,6 +141,15 @@ class SubjectBackfillRequest(BaseModel):
     offset: int | None = Field(default=None, ge=0)
 
 
+class RepositoryDataMigrationRequest(BaseModel):
+    source_repository_id: str = Field(default=DEFAULT_REPOSITORY_ID)
+    target_repository_id: str
+    target_repository_name: str | None = None
+    target_source_type: str = Field(default="opds-json")
+    target_config: dict[str, Any] = Field(default_factory=dict)
+    move_checkpoints: bool = True
+
+
 class CacheInvalidateRequest(BaseModel):
     repository_id: str | None = None
 
@@ -1725,6 +1734,53 @@ def _repository_source_domain(repository: RepositoryConfig, checkpoints) -> str 
     return None
 
 
+def _root_opds_mode() -> str:
+    mode = os.getenv("ROOT_OPDS_MODE", "publications").strip().casefold()
+    return mode if mode in {"publications", "repositories"} else "publications"
+
+
+def _build_root_repository_navigation_response(request: Request) -> dict:
+    _ensure_default_repository()
+    base = str(request.base_url).rstrip("/")
+    repositories = store.list_repositories(include_inactive=False)
+    navigation = []
+    for repository in repositories:
+        if repository.repository_id == DEFAULT_REPOSITORY_ID:
+            continue
+        navigation.append(
+            {
+                "href": f"{base}/repositories/{repository.repository_id}/opds",
+                "title": repository.name,
+                "type": "application/opds+json",
+                "rel": "subsection",
+                "numberOfItems": store.count(repository_id=repository.repository_id),
+            }
+        )
+
+    return {
+        "metadata": {
+            "@type": "https://opds.io/opds-catalog",
+            "title": "OPDS Repository Catalog",
+            "numberOfItems": len(navigation),
+            "mode": "repository-navigation",
+        },
+        "links": [
+            {
+                "rel": "self",
+                "href": f"{base}/opds",
+                "type": "application/opds+json",
+            },
+            {
+                "rel": "collection",
+                "href": f"{base}/opds/index",
+                "type": "application/opds+json",
+                "title": "Repository Index",
+            },
+        ],
+        "navigation": navigation,
+    }
+
+
 @app.get("/admin")
 def admin_ui() -> FileResponse:
     return FileResponse(STATIC_DIR / "admin.html")
@@ -2448,6 +2504,8 @@ def opds_feed(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
 ) -> dict:
+    if _root_opds_mode() == "repositories":
+        return _build_root_repository_navigation_response(request)
     return _opds_feed_for_repository(
         repository_id=DEFAULT_REPOSITORY_ID,
         request=request,
@@ -4033,6 +4091,58 @@ def admin_invalidate_cache(request: CacheInvalidateRequest) -> dict:
         return {"scope": "repository", "repository_id": repository_id, "removed_keys": removed}
     removed = _invalidate_opds_cache()
     return {"scope": "global", "removed_keys": removed}
+
+
+@app.post("/admin/repositories/migrate-data")
+def admin_migrate_repository_data(request: RepositoryDataMigrationRequest) -> dict:
+    source_repository_id = request.source_repository_id.strip()
+    target_repository_id = request.target_repository_id.strip()
+    if not source_repository_id or not target_repository_id:
+        raise HTTPException(status_code=400, detail="source_repository_id and target_repository_id are required")
+    if source_repository_id == target_repository_id:
+        raise HTTPException(status_code=400, detail="source_repository_id and target_repository_id must differ")
+
+    source_repository = _get_repository_or_404(source_repository_id)
+    target_repository = store.get_repository(target_repository_id)
+    if target_repository is None:
+        target_name = request.target_repository_name.strip() if isinstance(request.target_repository_name, str) and request.target_repository_name.strip() else target_repository_id
+        store.upsert_repository(
+            RepositoryConfig(
+                repository_id=target_repository_id,
+                source_type=request.target_source_type,
+                name=target_name,
+                config=request.target_config,
+                is_active=True,
+                updated_at="",
+                created_at="",
+            )
+        )
+        target_repository = _get_repository_or_404(target_repository_id)
+
+    try:
+        result = store.migrate_repository_data(
+            source_repository_id=source_repository_id,
+            target_repository_id=target_repository_id,
+            move_checkpoints=request.move_checkpoints,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    _invalidate_opds_cache(source_repository_id)
+    _invalidate_opds_cache(target_repository_id)
+    _invalidate_opds_cache(DEFAULT_REPOSITORY_ID)
+
+    return {
+        "migrated": True,
+        "source_repository_id": source_repository_id,
+        "source_repository_name": source_repository.name,
+        "target_repository_id": target_repository_id,
+        "target_repository_name": target_repository.name,
+        "move_checkpoints": request.move_checkpoints,
+        **result,
+        "source_remaining_publications": store.count(repository_id=source_repository_id),
+        "target_total_publications": store.count(repository_id=target_repository_id),
+    }
 
 
 @app.get("/repositories/{repository_id}/classifications/stats")

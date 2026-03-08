@@ -1319,3 +1319,81 @@ def test_admin_ui_renders_repository_and_opds_json_controls() -> None:
     assert "Rebuild Feed Derivations" in body
     assert "Delete" in body
     assert "repo-actions" in body
+
+
+def test_root_opds_can_emit_repository_navigation_catalog(monkeypatch, tmp_path) -> None:
+    _reset_store()
+    monkeypatch.setenv("ROOT_OPDS_MODE", "repositories")
+    create_repo = client.put(
+        "/repositories/nav-demo",
+        json={
+            "source_type": "json",
+            "name": "Navigation Demo",
+            "config": {},
+            "is_active": True,
+        },
+    )
+    assert create_repo.status_code == 200
+
+    payload_path = tmp_path / "root_nav_demo.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "publications": [
+                    {"id": "nav-demo-1", "title": "Nav Demo One"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    ingest_repo = client.post("/repositories/nav-demo/ingest/json", json={"path": str(payload_path)})
+    assert ingest_repo.status_code == 200
+
+    root_feed = client.get("/opds?page=1&page_size=10")
+    assert root_feed.status_code == 200
+    payload = root_feed.json()
+    assert payload["metadata"]["title"] == "OPDS Repository Catalog"
+    assert "publications" not in payload
+    assert isinstance(payload.get("navigation"), list)
+    assert any(
+        isinstance(item, dict) and "/repositories/nav-demo/opds" in str(item.get("href", ""))
+        for item in payload["navigation"]
+    )
+
+
+def test_admin_repository_data_migration_moves_default_to_target_repo() -> None:
+    _reset_store()
+    sample_path = Path(__file__).parent / "data" / "sample_oapen.json"
+    ingest_default = client.post("/ingest/json", json={"path": str(sample_path)})
+    assert ingest_default.status_code == 200
+    assert ingest_default.json()["accepted"] == 3
+
+    migrate = client.post(
+        "/admin/repositories/migrate-data",
+        json={
+            "source_repository_id": "default",
+            "target_repository_id": "oapen-migrated",
+            "target_repository_name": "OAPEN Migrated",
+            "target_source_type": "opds-json",
+            "target_config": {"url": "https://library.oapen.org/"},
+            "move_checkpoints": True,
+        },
+    )
+    assert migrate.status_code == 200
+    migrated = migrate.json()
+    assert migrated["migrated"] is True
+    assert migrated["moved_publications"] == 3
+    assert migrated["source_remaining_publications"] == 0
+    assert migrated["target_total_publications"] == 3
+
+    default_feed = client.get("/opds?page=1&page_size=10")
+    assert default_feed.status_code == 200
+    assert default_feed.json()["metadata"]["numberOfItems"] == 0
+
+    migrated_feed = client.get("/repositories/oapen-migrated/opds?page=1&page_size=10")
+    assert migrated_feed.status_code == 200
+    assert migrated_feed.json()["metadata"]["numberOfItems"] == 3
+
+    migrated_publication = client.get("/repositories/oapen-migrated/publications/book-1")
+    assert migrated_publication.status_code == 200
+    assert migrated_publication.json()["metadata"]["title"] == "Open Access Book One"
