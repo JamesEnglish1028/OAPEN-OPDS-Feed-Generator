@@ -1832,7 +1832,10 @@ def list_repositories(request: Request, include_inactive: bool = Query(default=T
     _ensure_default_repository()
     base = str(request.base_url).rstrip("/")
     repositories = []
+    root_mode = _root_opds_mode()
     for item in store.list_repositories(include_inactive=include_inactive):
+        if root_mode == "repositories" and item.repository_id == DEFAULT_REPOSITORY_ID:
+            continue
         checkpoints = store.list_checkpoints(repository_id=item.repository_id)
         repositories.append(
             {
@@ -3050,7 +3053,10 @@ def opds_repository_index(request: Request) -> dict:
     repositories = store.list_repositories(include_inactive=False)
     base = str(request.base_url).rstrip("/")
     links = []
+    root_mode = _root_opds_mode()
     for repository in repositories:
+        if root_mode == "repositories" and repository.repository_id == DEFAULT_REPOSITORY_ID:
+            continue
         links.append(
             {
                 "href": f"{base}/opds/{repository.repository_id}",

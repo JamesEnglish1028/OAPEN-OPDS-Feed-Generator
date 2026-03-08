@@ -1361,6 +1361,35 @@ def test_root_opds_can_emit_repository_navigation_catalog(monkeypatch, tmp_path)
     )
 
 
+def test_repositories_and_index_hide_default_when_root_mode_is_repositories(monkeypatch) -> None:
+    _reset_store()
+    monkeypatch.setenv("ROOT_OPDS_MODE", "repositories")
+
+    create_repo = client.put(
+        "/repositories/repo-mode-demo",
+        json={
+            "source_type": "json",
+            "name": "Repo Mode Demo",
+            "config": {},
+            "is_active": True,
+        },
+    )
+    assert create_repo.status_code == 200
+
+    repositories = client.get("/repositories")
+    assert repositories.status_code == 200
+    repo_ids = {item["repository_id"] for item in repositories.json()["repositories"]}
+    assert "default" not in repo_ids
+    assert "repo-mode-demo" in repo_ids
+
+    index = client.get("/opds/index")
+    assert index.status_code == 200
+    navigation = index.json().get("navigation", [])
+    hrefs = {str(item.get("href", "")) for item in navigation if isinstance(item, dict)}
+    assert not any(href.endswith("/opds/default") for href in hrefs)
+    assert any("/opds/repo-mode-demo" in href for href in hrefs)
+
+
 def test_admin_repository_data_migration_moves_default_to_target_repo() -> None:
     _reset_store()
     sample_path = Path(__file__).parent / "data" / "sample_oapen.json"
