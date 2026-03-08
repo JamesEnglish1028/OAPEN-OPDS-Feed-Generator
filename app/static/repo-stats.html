@@ -5,91 +5,129 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Repository Stats</title>
   <link rel="stylesheet" href="/static/admin.css">
+  <link rel="stylesheet" href="/static/repo-stats.css">
 </head>
 <body>
   <div class="wrap">
     <section class="hero">
       <div class="eyebrow">Analytics</div>
       <h1>Repository Stats</h1>
-      <p class="sub">Summary metrics for publications, types, formats, language, publishers, authors, years, and publication groups/subgroups.</p>
+      <p class="sub">Repository-level metrics organized for fast operational review and drill-down analysis.</p>
       <div class="actions">
         <button type="button" class="ghost" onclick="window.location.href='/admin'">Back To Admin</button>
       </div>
     </section>
 
-    <section class="section">
-      <div class="grid">
-        <div class="card">
-          <h2>Load Stats</h2>
-          <div class="row">
-            <div>
-              <label for="repository-select">Repository</label>
-              <select id="repository-select"></select>
-            </div>
-            <div>
-              <label for="top-limit">Top Limit</label>
-              <input id="top-limit" type="number" min="1" max="500" value="25">
-            </div>
+    <section class="section control-sticky">
+      <div class="card">
+        <h2>Controls</h2>
+        <div class="row stats-row">
+          <div>
+            <label for="repository-select">Repository</label>
+            <select id="repository-select"></select>
           </div>
-          <div class="actions">
-            <button type="button" id="refresh-stats">Refresh Stats</button>
+          <div>
+            <label for="top-limit">Top Limit</label>
+            <input id="top-limit" type="number" min="1" max="500" value="25">
           </div>
-          <p id="status" class="summary">Loading repositories...</p>
+          <div>
+            <label for="row-limit">Rows Per Table</label>
+            <select id="row-limit">
+              <option value="25">25</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+              <option value="250">250</option>
+            </select>
+          </div>
+          <div>
+            <label for="sort-order">Default Sort</label>
+            <select id="sort-order">
+              <option value="count-desc" selected>Count Desc</option>
+              <option value="count-asc">Count Asc</option>
+              <option value="name-asc">Name A-Z</option>
+              <option value="name-desc">Name Z-A</option>
+            </select>
+          </div>
         </div>
+        <div class="actions">
+          <button type="button" id="refresh-stats">Refresh Stats</button>
+          <button type="button" id="expand-all" class="ghost">Expand All</button>
+          <button type="button" id="collapse-all" class="ghost">Collapse All</button>
+        </div>
+        <p id="status" class="summary">Loading repositories...</p>
       </div>
     </section>
 
-    <section class="section">
-      <div class="grid" id="summary-cards"></div>
-    </section>
+    <section class="section" id="stats-accordion">
+      <details class="stats-section" data-section="snapshot" open>
+        <summary>Repository Snapshot</summary>
+        <div class="stats-content">
+          <div class="grid" id="summary-cards"></div>
+        </div>
+      </details>
 
-    <section class="section">
-      <div class="grid">
-        <div class="card">
-          <h2>Publication Types</h2>
-          <div id="types-table"></div>
+      <details class="stats-section" data-section="content-profile">
+        <summary>Content Profile</summary>
+        <div class="stats-content grid">
+          <div class="card">
+            <h2>Publication Types</h2>
+            <div id="types-table"></div>
+          </div>
+          <div class="card">
+            <h2>Formats</h2>
+            <div id="formats-table"></div>
+          </div>
         </div>
-        <div class="card">
-          <h2>Formats</h2>
-          <div id="formats-table"></div>
+      </details>
+
+      <details class="stats-section" data-section="people-imprints">
+        <summary>People &amp; Imprints</summary>
+        <div class="stats-content grid">
+          <div class="card">
+            <h2>Top Authors</h2>
+            <input id="author-filter" type="text" placeholder="Filter authors...">
+            <div id="authors-table"></div>
+          </div>
+          <div class="card">
+            <h2>Top Publishers</h2>
+            <input id="publisher-filter" type="text" placeholder="Filter publishers...">
+            <div id="publishers-table"></div>
+          </div>
+          <div class="card">
+            <h2>Top Series</h2>
+            <input id="series-filter" type="text" placeholder="Filter series...">
+            <div id="series-table"></div>
+          </div>
         </div>
-      </div>
-      <div class="grid">
-        <div class="card">
-          <h2>Languages</h2>
-          <div id="languages-table"></div>
+      </details>
+
+      <details class="stats-section" data-section="language-time">
+        <summary>Language &amp; Time</summary>
+        <div class="stats-content grid">
+          <div class="card">
+            <h2>Languages</h2>
+            <div id="languages-table"></div>
+          </div>
+          <div class="card">
+            <h2>Publication Years</h2>
+            <div id="years-table"></div>
+          </div>
         </div>
-        <div class="card">
-          <h2>Top Publishers</h2>
-          <div id="publishers-table"></div>
+      </details>
+
+      <details class="stats-section" data-section="feed-health" open>
+        <summary>Feed Organization Health</summary>
+        <div class="stats-content grid">
+          <div class="card">
+            <h2>Top-Level Groups</h2>
+            <div id="groups-table"></div>
+          </div>
+          <div class="card">
+            <h2>Subgroups</h2>
+            <div id="subgroups-table"></div>
+          </div>
         </div>
-      </div>
-      <div class="grid">
-        <div class="card">
-          <h2>Top Authors</h2>
-          <div id="authors-table"></div>
-        </div>
-        <div class="card">
-          <h2>Top Series</h2>
-          <div id="series-table"></div>
-        </div>
-      </div>
-      <div class="grid">
-        <div class="card">
-          <h2>Publication Years</h2>
-          <div id="years-table"></div>
-        </div>
-      </div>
-      <div class="grid">
-        <div class="card">
-          <h2>Top-Level Groups</h2>
-          <div id="groups-table"></div>
-        </div>
-        <div class="card">
-          <h2>Subgroups</h2>
-          <div id="subgroups-table"></div>
-        </div>
-      </div>
+      </details>
     </section>
   </div>
 
