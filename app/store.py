@@ -101,6 +101,17 @@ class SubjectAuthorityBackfillResult:
     error_examples: list[dict[str, str]] | None = None
 
 
+@dataclass
+class BatchClearResult:
+    deleted_publications: int
+    deleted_subject_rows: int
+    deleted_category_rows: int
+    deleted_group_rows: int
+    deleted_subgroup_rows: int
+    next_cursor: str | None
+    has_more: bool
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -2567,6 +2578,90 @@ class PublicationStore:
             result = session.execute(statement)
             session.commit()
             return int(result.rowcount or 0)
+
+    def clear_batch(
+        self,
+        *,
+        repository_id: str,
+        batch_size: int = 1000,
+        start_after: str | None = None,
+    ) -> BatchClearResult:
+        effective_batch_size = max(1, min(int(batch_size), 5000))
+        with self._session() as session:
+            statement = (
+                select(PublicationRow.publication_id)
+                .where(PublicationRow.repository_id == repository_id)
+                .order_by(PublicationRow.publication_id.asc())
+                .limit(effective_batch_size)
+            )
+            normalized_start_after = (start_after or "").strip()
+            if normalized_start_after:
+                statement = statement.where(PublicationRow.publication_id > normalized_start_after)
+            storage_ids = [str(item) for item in session.scalars(statement).all() if isinstance(item, str) and item]
+            if not storage_ids:
+                return BatchClearResult(
+                    deleted_publications=0,
+                    deleted_subject_rows=0,
+                    deleted_category_rows=0,
+                    deleted_group_rows=0,
+                    deleted_subgroup_rows=0,
+                    next_cursor=None,
+                    has_more=False,
+                )
+
+            subject_result = session.execute(
+                PublicationSubjectRow.__table__.delete().where(
+                    PublicationSubjectRow.repository_id == repository_id,
+                    PublicationSubjectRow.publication_id.in_(storage_ids),
+                )
+            )
+            category_result = session.execute(
+                PublicationSubjectCategoryRow.__table__.delete().where(
+                    PublicationSubjectCategoryRow.repository_id == repository_id,
+                    PublicationSubjectCategoryRow.publication_id.in_(storage_ids),
+                )
+            )
+            group_result = session.execute(
+                PublicationGroupMembershipRow.__table__.delete().where(
+                    PublicationGroupMembershipRow.repository_id == repository_id,
+                    PublicationGroupMembershipRow.publication_id.in_(storage_ids),
+                )
+            )
+            subgroup_result = session.execute(
+                PublicationSubgroupMembershipRow.__table__.delete().where(
+                    PublicationSubgroupMembershipRow.repository_id == repository_id,
+                    PublicationSubgroupMembershipRow.publication_id.in_(storage_ids),
+                )
+            )
+            publication_result = session.execute(
+                PublicationRow.__table__.delete().where(
+                    PublicationRow.repository_id == repository_id,
+                    PublicationRow.publication_id.in_(storage_ids),
+                )
+            )
+
+            last_id = storage_ids[-1]
+            has_more = bool(
+                session.scalar(
+                    select(sqla_func.count())
+                    .select_from(PublicationRow)
+                    .where(
+                        PublicationRow.repository_id == repository_id,
+                        PublicationRow.publication_id > last_id,
+                    )
+                )
+                or 0
+            )
+            session.commit()
+            return BatchClearResult(
+                deleted_publications=int(publication_result.rowcount or 0),
+                deleted_subject_rows=int(subject_result.rowcount or 0),
+                deleted_category_rows=int(category_result.rowcount or 0),
+                deleted_group_rows=int(group_result.rowcount or 0),
+                deleted_subgroup_rows=int(subgroup_result.rowcount or 0),
+                next_cursor=last_id if has_more else None,
+                has_more=has_more,
+            )
 
     def list_publication_ids_by_identifier_prefix(
         self,

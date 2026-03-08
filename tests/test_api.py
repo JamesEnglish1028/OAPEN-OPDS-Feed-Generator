@@ -1426,3 +1426,33 @@ def test_admin_repository_data_migration_moves_default_to_target_repo() -> None:
     migrated_publication = client.get("/repositories/oapen-migrated/publications/book-1")
     assert migrated_publication.status_code == 200
     assert migrated_publication.json()["metadata"]["title"] == "Open Access Book One"
+
+
+def test_clear_data_batch_supports_default_repository() -> None:
+    _reset_store()
+    sample_path = Path(__file__).parent / "data" / "sample_oapen.json"
+    ingest = client.post("/ingest/json", json={"path": str(sample_path)})
+    assert ingest.status_code == 200
+    assert ingest.json()["accepted"] == 3
+
+    first_batch = client.post(
+        "/repositories/default/clear-data-batch",
+        json={"batch_size": 2},
+    )
+    assert first_batch.status_code == 200
+    first_payload = first_batch.json()
+    assert first_payload["deleted_publications"] == 2
+    assert first_payload["has_more"] is True
+    assert isinstance(first_payload.get("next_cursor"), str) and first_payload["next_cursor"]
+    assert first_payload["remaining_publications"] == 1
+
+    second_batch = client.post(
+        "/repositories/default/clear-data-batch",
+        json={"batch_size": 2, "start_after": first_payload["next_cursor"], "clear_checkpoints": True},
+    )
+    assert second_batch.status_code == 200
+    second_payload = second_batch.json()
+    assert second_payload["deleted_publications"] == 1
+    assert second_payload["has_more"] is False
+    assert second_payload["next_cursor"] is None
+    assert second_payload["remaining_publications"] == 0

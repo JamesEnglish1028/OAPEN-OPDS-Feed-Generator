@@ -141,6 +141,12 @@ class SubjectBackfillRequest(BaseModel):
     offset: int | None = Field(default=None, ge=0)
 
 
+class BatchClearRequest(BaseModel):
+    batch_size: int = Field(default=1000, ge=1, le=5000)
+    start_after: str | None = None
+    clear_checkpoints: bool = False
+
+
 class RepositoryDataMigrationRequest(BaseModel):
     source_repository_id: str = Field(default=DEFAULT_REPOSITORY_ID)
     target_repository_id: str
@@ -1911,6 +1917,37 @@ def clear_repository_data(repository_id: str) -> dict:
         "removed_publications": removed_publications,
         "removed_checkpoints": removed_checkpoints,
         "repository_preserved": True,
+    }
+
+
+@app.post("/repositories/{repository_id}/clear-data-batch")
+def clear_repository_data_batch(repository_id: str, request: BatchClearRequest) -> dict:
+    repository = _get_repository_or_404(repository_id)
+    result = store.clear_batch(
+        repository_id=repository_id,
+        batch_size=request.batch_size,
+        start_after=request.start_after,
+    )
+    checkpoints_cleared = False
+    if request.clear_checkpoints and not result.has_more:
+        store.clear_checkpoints(repository_id=repository_id)
+        checkpoints_cleared = True
+    if result.deleted_publications > 0 or checkpoints_cleared:
+        _invalidate_opds_cache(repository_id)
+    return {
+        "repository_id": repository_id,
+        "repository_name": repository.name,
+        "deleted_publications": result.deleted_publications,
+        "deleted_subject_rows": result.deleted_subject_rows,
+        "deleted_category_rows": result.deleted_category_rows,
+        "deleted_group_rows": result.deleted_group_rows,
+        "deleted_subgroup_rows": result.deleted_subgroup_rows,
+        "next_cursor": result.next_cursor,
+        "has_more": result.has_more,
+        "batch_size": request.batch_size,
+        "clear_checkpoints": request.clear_checkpoints,
+        "checkpoints_cleared": checkpoints_cleared,
+        "remaining_publications": store.count(repository_id=repository_id),
     }
 
 
