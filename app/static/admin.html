@@ -21,7 +21,7 @@
         <p class="section-copy">Use these task views to reduce context switching: configure repositories, run ingestion, then perform maintenance.</p>
       </div>
       <div class="actions">
-        <button type="button" id="open-guide-modal" class="ghost">How To Guide</button>
+        <button type="button" id="open-guide-modal" class="ghost" onclick="window.__openGuideModal && window.__openGuideModal()">How To Guide</button>
       </div>
       <div class="flow-nav" role="tablist" aria-label="Operator task views">
         <button type="button" id="view-repositories" data-view-button="repositories" class="active">Repositories</button>
@@ -207,7 +207,7 @@
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="guide-modal-title">
       <div class="modal-head">
         <h2 id="guide-modal-title">How To Guide</h2>
-        <button type="button" id="close-guide-modal" class="ghost modal-close">Close</button>
+        <button type="button" id="close-guide-modal" class="ghost modal-close" onclick="window.__closeGuideModal && window.__closeGuideModal()">Close</button>
       </div>
       <div class="grid">
         <div class="card guide-card">
@@ -256,6 +256,35 @@
       </div>
     </div>
   </div>
+
+  <script>
+    (function () {
+      var openButton = document.getElementById("open-guide-modal");
+      var closeButton = document.getElementById("close-guide-modal");
+      var modal = document.getElementById("guide-modal");
+      if (!openButton || !closeButton || !modal) {
+        return;
+      }
+      window.__openGuideModal = function () {
+        modal.hidden = false;
+      };
+      window.__closeGuideModal = function () {
+        modal.hidden = true;
+      };
+      openButton.addEventListener("click", window.__openGuideModal);
+      closeButton.addEventListener("click", window.__closeGuideModal);
+      modal.addEventListener("click", function (event) {
+        if (event.target === modal) {
+          window.__closeGuideModal();
+        }
+      });
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && !modal.hidden) {
+          window.__closeGuideModal();
+        }
+      });
+    })();
+  </script>
 
   <script src="/static/admin.js" defer></script>
 </body>
