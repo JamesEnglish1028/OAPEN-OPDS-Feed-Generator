@@ -1776,12 +1776,6 @@ def _build_root_repository_navigation_response(request: Request) -> dict:
                 "href": f"{base}/opds",
                 "type": "application/opds+json",
             },
-            {
-                "rel": "collection",
-                "href": f"{base}/opds/index",
-                "type": "application/opds+json",
-                "title": "Repository Index",
-            },
         ],
         "catalogs": catalogs,
     }
