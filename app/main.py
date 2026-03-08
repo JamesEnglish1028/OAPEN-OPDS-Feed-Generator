@@ -1749,16 +1749,16 @@ def _build_root_repository_navigation_response(request: Request) -> dict:
     _ensure_default_repository()
     base = str(request.base_url).rstrip("/")
     repositories = store.list_repositories(include_inactive=False)
-    navigation = []
+    catalogs = []
     for repository in repositories:
         if repository.repository_id == DEFAULT_REPOSITORY_ID:
             continue
-        navigation.append(
+        catalogs.append(
             {
                 "href": f"{base}/repositories/{repository.repository_id}/opds",
                 "title": repository.name,
                 "type": "application/opds+json",
-                "rel": "subsection",
+                "rel": "http://opds-spec.org/catalog",
                 "numberOfItems": store.count(repository_id=repository.repository_id),
             }
         )
@@ -1767,8 +1767,8 @@ def _build_root_repository_navigation_response(request: Request) -> dict:
         "metadata": {
             "@type": "https://opds.io/opds-catalog",
             "title": "OPDS Repository Catalog",
-            "numberOfItems": len(navigation),
-            "mode": "repository-navigation",
+            "numberOfItems": len(catalogs),
+            "mode": "repository-registry",
         },
         "links": [
             {
@@ -1783,7 +1783,7 @@ def _build_root_repository_navigation_response(request: Request) -> dict:
                 "title": "Repository Index",
             },
         ],
-        "navigation": navigation,
+        "catalogs": catalogs,
     }
 
 
