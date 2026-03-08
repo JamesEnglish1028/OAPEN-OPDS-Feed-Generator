@@ -2072,7 +2072,7 @@ def preview_opds_json_directories(request: OpdsDirectoryPreviewRequest) -> dict:
 @app.post("/ingest/opds-json/directories/import")
 def import_opds_json_directories(request: OpdsDirectoryImportRequest) -> dict:
     mode = request.mode.strip().casefold()
-    valid_modes = {"split-repositories", "single-repository-collections"}
+    valid_modes = {"split-repositories", "single-repository-collections", "single-repository-flat"}
     if mode not in valid_modes:
         raise HTTPException(status_code=400, detail=f"mode must be one of: {', '.join(sorted(valid_modes))}")
     if not request.directories:
@@ -2082,9 +2082,9 @@ def import_opds_json_directories(request: OpdsDirectoryImportRequest) -> dict:
     created_repositories: list[dict] = []
 
     target_repository_id = request.target_repository_id.strip() if isinstance(request.target_repository_id, str) else None
-    if mode == "single-repository-collections":
+    if mode in {"single-repository-collections", "single-repository-flat"}:
         if not target_repository_id:
-            raise HTTPException(status_code=400, detail="target_repository_id is required for single-repository-collections mode")
+            raise HTTPException(status_code=400, detail="target_repository_id is required for single-repository modes")
         _get_repository_or_404(target_repository_id)
 
     for directory in request.directories:

@@ -38,6 +38,7 @@
     const harvestIncrementalInput = document.getElementById("harvest-incremental");
     const directoryModeSplitInput = document.getElementById("directory-mode-split");
     const directoryModeSingleInput = document.getElementById("directory-mode-single");
+    const directoryModeSingleFlatInput = document.getElementById("directory-mode-single-flat");
     const directoryImportSummary = document.getElementById("directory-import-summary");
     const directoryList = document.getElementById("directory-list");
     const directorySelectAll = document.getElementById("directory-select-all");
@@ -211,6 +212,10 @@
         directoryImportSummary.textContent = "This will create " + selectedCount + " repository" + (selectedCount === 1 ? "" : "ies") + " from the selected directories.";
         return;
       }
+      if (mode === "single-repository-flat") {
+        directoryImportSummary.textContent = "This will import " + selectedCount + " directories into repository '" + targetRepository + "' without creating collections.";
+        return;
+      }
       directoryImportSummary.textContent = "This will import " + selectedCount + " directories into repository '" + targetRepository + "' as collections.";
     }
 
@@ -255,7 +260,7 @@
       if (selectedCount > 0) {
         startHarvestButton.disabled = true;
         importAsRepositoriesButton.disabled = harvestBusy || !(mode === "split-repositories");
-        importIntoRepositoryButton.disabled = harvestBusy || !(mode === "single-repository-collections");
+        importIntoRepositoryButton.disabled = harvestBusy || !(mode === "single-repository-collections" || mode === "single-repository-flat");
         if (harvestBusy) {
           harvestActionHint.textContent = "Harvest is running...";
           updateRepoFormButtonState();
@@ -263,6 +268,8 @@
         }
         if (mode === "split-repositories") {
           harvestActionHint.textContent = "Directories selected: use 'Create Repositories' to import them.";
+        } else if (mode === "single-repository-flat") {
+          harvestActionHint.textContent = "Directories selected: use 'Import Into Selected Repository' to ingest without creating collections.";
         } else {
           harvestActionHint.textContent = "Directories selected: use 'Import Into Selected Repository' to ingest as collections.";
         }
@@ -893,7 +900,7 @@
         const maxRecords = harvestMaxRecordsInput.value.trim();
         if (maxPages) payload.max_pages = Number(maxPages);
         if (maxRecords) payload.max_records = Number(maxRecords);
-        if (mode === "single-repository-collections") {
+        if (mode === "single-repository-collections" || mode === "single-repository-flat") {
           payload.target_repository_id = repoSelect.value;
         }
 
@@ -1040,6 +1047,9 @@
       syncDirectoryImportModeUi();
     });
     directoryModeSingleInput.addEventListener("change", () => {
+      syncDirectoryImportModeUi();
+    });
+    directoryModeSingleFlatInput.addEventListener("change", () => {
       syncDirectoryImportModeUi();
     });
     repoSelect.addEventListener("change", () => {
