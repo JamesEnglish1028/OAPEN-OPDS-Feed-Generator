@@ -1745,7 +1745,7 @@ def _root_opds_mode() -> str:
     return mode if mode in {"publications", "repositories"} else "publications"
 
 
-def _build_root_repository_navigation_response(request: Request) -> dict:
+def _root_registry_catalog_entries(request: Request) -> list[dict]:
     _ensure_default_repository()
     base = str(request.base_url).rstrip("/")
     repositories = store.list_repositories(include_inactive=False)
@@ -1760,8 +1760,15 @@ def _build_root_repository_navigation_response(request: Request) -> dict:
                 "type": "application/opds+json",
                 "rel": "http://opds-spec.org/catalog",
                 "numberOfItems": store.count(repository_id=repository.repository_id),
+                "repositoryId": repository.repository_id,
             }
         )
+    return catalogs
+
+
+def _build_root_repository_navigation_response(request: Request) -> dict:
+    base = str(request.base_url).rstrip("/")
+    catalogs = _root_registry_catalog_entries(request)
 
     return {
         "metadata": {
@@ -1775,6 +1782,13 @@ def _build_root_repository_navigation_response(request: Request) -> dict:
                 "rel": "self",
                 "href": f"{base}/opds",
                 "type": "application/opds+json",
+            },
+            {
+                "rel": "search",
+                "href": f"{base}/opds/registry/search" + "{?query,limit,offset}",
+                "type": "application/opds+json",
+                "templated": True,
+                "title": "Search Catalog Registry",
             },
         ],
         "catalogs": catalogs,
@@ -2580,6 +2594,97 @@ def opds_feed_default_alias(
     page_size: int = Query(default=50, ge=1, le=500),
 ) -> dict:
     return opds_feed(request=request, page=page, page_size=page_size)
+
+
+@app.get("/opds/registry/search")
+def opds_registry_search(
+    request: Request,
+    query: str | None = Query(default=None),
+    q: str | None = Query(default=None),
+    limit: int = Query(default=25, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> dict:
+    search_value = (query if isinstance(query, str) else q if isinstance(q, str) else "").strip()
+    search_key = search_value.casefold()
+    catalogs = _root_registry_catalog_entries(request)
+    if search_key:
+        catalogs = [
+            item
+            for item in catalogs
+            if (
+                search_key in str(item.get("title", "")).casefold()
+                or search_key in str(item.get("href", "")).casefold()
+                or search_key in str(item.get("repositoryId", "")).casefold()
+            )
+        ]
+
+    total = len(catalogs)
+    subset = catalogs[offset : offset + limit]
+    end = offset + len(subset)
+    def _search_params(next_offset: int) -> dict[str, str | int]:
+        params: dict[str, str | int] = {"limit": limit, "offset": next_offset}
+        if search_value:
+            params["query"] = search_value
+        return params
+
+    links = [
+        {
+            "rel": "self",
+            "href": _build_url(
+                request,
+                "/opds/registry/search",
+                _search_params(offset),
+            ),
+            "type": "application/opds+json",
+        },
+        {
+            "rel": "start",
+            "href": _build_url(
+                request,
+                "/opds",
+                {},
+            ),
+            "type": "application/opds+json",
+        },
+    ]
+    if offset > 0:
+        links.append(
+            {
+                "rel": "previous",
+                "href": _build_url(
+                    request,
+                    "/opds/registry/search",
+                    _search_params(max(offset - limit, 0)),
+                ),
+                "type": "application/opds+json",
+            }
+        )
+    if end < total:
+        links.append(
+            {
+                "rel": "next",
+                "href": _build_url(
+                    request,
+                    "/opds/registry/search",
+                    _search_params(end),
+                ),
+                "type": "application/opds+json",
+            }
+        )
+
+    return {
+        "metadata": {
+            "@type": "https://opds.io/opds-catalog",
+            "title": "OPDS Registry Search",
+            "numberOfItems": total,
+            "itemsPerPage": limit,
+            "currentOffset": offset,
+            "query": search_value,
+            "mode": "repository-registry-search",
+        },
+        "links": links,
+        "catalogs": subset,
+    }
 
 
 @app.get("/opds/navigation/languages")
